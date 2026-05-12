@@ -1,0 +1,250 @@
+"""
+Data loader: fetches from Supabase, builds typed model objects for the routing engine.
+"""
+
+import logging
+from datetime import date, datetime, time
+from typing import Optional
+
+from supabase import Client
+
+from backend.models.models import (
+    Driver, Load, Site, Terminal, Yard, LoadProduct,
+)
+
+log = logging.getLogger(__name__)
+
+
+def _parse_time(val) -> Optional[time]:
+    if not val:
+        return None
+    if isinstance(val, time):
+        return val
+    try:
+        parts = str(val).strip().split(":")
+        return time(int(parts[0]), int(parts[1]))
+    except Exception:
+        return None
+
+
+def _parse_dt(val) -> Optional[datetime]:
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(str(val))
+    except Exception:
+        return None
+
+
+def load_yards(client: Client) -> dict[str, Yard]:
+    rows = client.table("yard_locations").select("*").execute().data
+    yards = {}
+    for r in rows:
+        if r.get("yard"):
+            yards[r["yard"]] = Yard(
+                yard=r["yard"],
+                latitude=float(r.get("latitude") or 0),
+                longitude=float(r.get("longitude") or 0),
+                address=r.get("yard_address") or "",
+                city=r.get("city") or "",
+                state=r.get("state") or "",
+                zip=str(r.get("zip") or ""),
+            )
+    log.info(f"Loaded {len(yards)} yards")
+    return yards
+
+
+def load_terminals(client: Client) -> dict[int, Terminal]:
+    rows = client.table("terminal_locations").select("*").execute().data
+    terminals = {}
+    for r in rows:
+        tid = r.get("terminal_id")
+        if tid:
+            terminals[int(tid)] = Terminal(
+                terminal_id=int(tid),
+                terminal_name=r.get("terminal_name") or "",
+                latitude=float(r.get("latitude") or 0),
+                longitude=float(r.get("longitude") or 0),
+                abbreviation=r.get("terminal_abbreviation") or "",
+                address=r.get("terminal_address") or "",
+                city=r.get("city") or "",
+                state=r.get("state") or "",
+                is_diesel_wet=int(r.get("is_diesel_wet") or 0),
+            )
+    log.info(f"Loaded {len(terminals)} terminals")
+    return terminals
+
+
+def load_sites(client: Client) -> dict[int, Site]:
+    rows = client.table("site_details").select("*").execute().data
+    sites = {}
+    for r in rows:
+        sid = r.get("site_id")
+        if sid:
+            sites[int(sid)] = Site(
+                site_id=int(sid),
+                site_name=r.get("site_name") or "",
+                latitude=float(r.get("latitude") or 0),
+                longitude=float(r.get("longitude") or 0),
+                customer_group_name=r.get("customer_group_name") or "",
+                address=r.get("site_address") or "",
+                city=r.get("city") or "",
+                state=r.get("state") or "",
+                pump_certified=int(r.get("pump_certified") or 0),
+            )
+    log.info(f"Loaded {len(sites)} sites")
+    return sites
+
+
+def load_driver_terminal_access(client: Client) -> dict[int, set]:
+    """Returns {driver_id: {terminal_id, ...}}"""
+    rows = client.table("driver_terminal_cards").select("driver_id, terminal_id").execute().data
+    access = {}
+    for r in rows:
+        did = r.get("driver_id")
+        tid = r.get("terminal_id")
+        if did and tid:
+            access.setdefault(int(did), set()).add(int(tid))
+    return access
+
+
+def load_driver_restrictions(client: Client) -> dict[int, dict]:
+    """Returns {driver_id: {site_ids: set, customer_groups: set}}"""
+    rows = client.table("driver_restrictions").select("*").execute().data
+    restrictions = {}
+    for r in rows:
+        did = r.get("driver_id")
+        if not did:
+            continue
+        did = int(did)
+        if did not in restrictions:
+            restrictions[did] = {"site_ids": set(), "customer_groups": set()}
+        if r.get("restriction_type") == "site" and r.get("site_id"):
+            restrictions[did]["site_ids"].add(int(r["site_id"]))
+        if r.get("restriction_type") == "customer" and r.get("customer_group_name"):
+            restrictions[did]["customer_groups"].add(r["customer_group_name"])
+    return restrictions
+
+
+def load_drivers_for_date(
+    client: Client,
+    dispatch_date: date,
+    yards: dict[str, Yard],
+) -> list[Driver]:
+    date_str = dispatch_date.isoformat()
+    rows = (
+        client.table("driver_schedules")
+        .select("*")
+        .eq("shift_date", date_str)
+        .execute()
+        .data
+    )
+
+    terminal_access = load_driver_terminal_access(client)
+    restrictions = load_driver_restrictions(client)
+
+    drivers = []
+    seen = set()
+    for r in rows:
+        # attendance_expected overrides driver_schedule
+        is_working = int(r.get("attendance_expected") or 0)
+        if not is_working:
+            continue
+
+        did = r.get("driver_id")
+        if not did or did in seen:
+            continue
+        seen.add(int(did))
+
+        start_t = _parse_time(r.get("driver_start_time")) or time(6, 0)
+        yard_name = r.get("yard") or ""
+        yard_loc = yards.get(yard_name)
+
+        driver = Driver(
+            driver_id=int(did),
+            first_name=r.get("first_name") or "",
+            last_name=r.get("last_name") or "",
+            yard=yard_name,
+            board_location=r.get("board_location") or "",
+            start_time=start_t,
+            pump_trained=int(r.get("pump_trained") or 0),
+            max_shift_hours=float(r.get("max_shift_hours") or 12.0),
+            yard_location=yard_loc,
+            terminal_ids=terminal_access.get(int(did), set()),
+        )
+        rid = restrictions.get(int(did), {})
+        driver.restricted_site_ids = rid.get("site_ids", set())
+        driver.restricted_customer_groups = rid.get("customer_groups", set())
+
+        drivers.append(driver)
+
+    log.info(f"Loaded {len(drivers)} active drivers for {date_str}")
+    return drivers
+
+
+def load_loads_for_date(
+    client: Client,
+    dispatch_date: date,
+) -> list[Load]:
+    """Load all loads within ±1 day of dispatch_date."""
+    from datetime import timedelta
+    dates = [
+        (dispatch_date - timedelta(days=1)).isoformat(),
+        dispatch_date.isoformat(),
+        (dispatch_date + timedelta(days=1)).isoformat(),
+    ]
+
+    all_rows = []
+    for d in dates:
+        rows = (
+            client.table("load_details")
+            .select("*")
+            .eq("delivery_date", d)
+            .execute()
+            .data
+        )
+        all_rows.extend(rows)
+
+    # Group by ce_id
+    ce_map: dict[int, dict] = {}
+    for r in all_rows:
+        ce = r.get("ce_id")
+        if not ce:
+            continue
+        ce = int(ce)
+        if ce not in ce_map:
+            ce_map[ce] = {**r, "products": []}
+        product = r.get("product_name")
+        gallons = float(r.get("gross_gallons") or 0)
+        if product:
+            ce_map[ce]["products"].append(LoadProduct(product_name=product, gross_gallons=gallons))
+
+    loads = []
+    for ce, r in ce_map.items():
+        load = Load(
+            ce_id=ce,
+            delivery_date=str(r.get("delivery_date") or "")[:10],
+            customer_name=r.get("customer_name") or "",
+            order_number=r.get("order_number"),
+            site_id=int(r.get("site_id") or 0),
+            terminal_id=int(r.get("terminal_id") or 0),
+            terminal_name=r.get("terminal_name") or "",
+            products=r["products"],
+            load_status=int(r.get("load_status") or 0),
+            city=r.get("city") or "",
+            state=r.get("state") or "",
+            site_name=r.get("site_name") or "",
+            site_address=r.get("site_address") or "",
+            window_start=_parse_dt(r.get("window_start")),
+            window_end=_parse_dt(r.get("window_end")),
+            delivery_eta=_parse_dt(r.get("delivery_eta")),
+            assigned_driver_id=None,  # resolved from first_name/last_name if needed
+            assigned_driver_first=r.get("first_name"),
+            assigned_driver_last=r.get("last_name"),
+        )
+        loads.append(load)
+
+    log.info(f"Loaded {len(loads)} unique loads (ce_ids) for {dispatch_date}")
+    return loads

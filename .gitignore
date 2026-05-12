@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+.vercel/
+dist/
+build/
+
+# Logs
+*.log
+sync.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.env
+!*.env.example
