@@ -249,15 +249,18 @@ ALTER TABLE dispatch_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE driver_restrictions ENABLE ROW LEVEL SECURITY;
 
 -- All authenticated users can read dispatch data
+DROP POLICY IF EXISTS "Authenticated users can read dispatch_results" ON dispatch_results;
 CREATE POLICY "Authenticated users can read dispatch_results"
     ON dispatch_results FOR SELECT
     USING (auth.role() = 'authenticated');
 
+DROP POLICY IF EXISTS "Authenticated users can read unassigned_loads" ON unassigned_loads;
 CREATE POLICY "Authenticated users can read unassigned_loads"
     ON unassigned_loads FOR SELECT
     USING (auth.role() = 'authenticated');
 
 -- Only admins can manage users
+DROP POLICY IF EXISTS "Admins manage users" ON app_users;
 CREATE POLICY "Admins manage users"
     ON app_users FOR ALL
     USING (
@@ -276,9 +279,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_yard_updated ON yard_locations;
 CREATE TRIGGER trg_yard_updated BEFORE UPDATE ON yard_locations FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS trg_terminal_updated ON terminal_locations;
 CREATE TRIGGER trg_terminal_updated BEFORE UPDATE ON terminal_locations FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS trg_site_updated ON site_details;
 CREATE TRIGGER trg_site_updated BEFORE UPDATE ON site_details FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS trg_schedule_updated ON driver_schedules;
 CREATE TRIGGER trg_schedule_updated BEFORE UPDATE ON driver_schedules FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS trg_dtc_updated ON driver_terminal_cards;
 CREATE TRIGGER trg_dtc_updated BEFORE UPDATE ON driver_terminal_cards FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS trg_load_updated ON load_details;
 CREATE TRIGGER trg_load_updated BEFORE UPDATE ON load_details FOR EACH ROW EXECUTE FUNCTION update_updated_at();
