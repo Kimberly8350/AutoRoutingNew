@@ -123,6 +123,18 @@ def transform_driver_schedules(df: pd.DataFrame) -> list[dict]:
     if "max_shift_hours" not in df.columns:
         df["max_shift_hours"] = 12.0
 
+    # Derive board_location from division_prefix + default_shift_name (e.g. "TX" + "AM" → "TX-AM")
+    VALID_BOARD_LOCS = {"TX-AM", "TX-PM", "FW-AM", "FW-PM", "ET-AM"}
+    if "division_prefix" in df.columns and "default_shift_name" in df.columns:
+        df["board_location"] = (
+            df["division_prefix"].fillna("").str.strip().str.upper()
+            + "-"
+            + df["default_shift_name"].fillna("").str.strip().str.upper()
+        )
+        df["board_location"] = df["board_location"].apply(
+            lambda x: x if x in VALID_BOARD_LOCS else None
+        )
+
     # Only keep columns that exist in the DB schema — drop extra ODBC columns
     DB_COLS = {
         "record_id", "driver_id", "first_name", "last_name", "driver_start_time",
