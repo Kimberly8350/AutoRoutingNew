@@ -8,7 +8,7 @@ from typing import Optional
 
 from supabase import Client
 
-from backend.models.models import (
+from models.models import (
     Driver, Load, Site, Terminal, Yard, LoadProduct,
 )
 

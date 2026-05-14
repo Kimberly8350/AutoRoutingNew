@@ -14,11 +14,11 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-from backend.engine.data_loader import (
+from engine.data_loader import (
     load_yards, load_terminals, load_sites,
     load_drivers_for_date, load_loads_for_date,
 )
-from backend.engine.routing_engine import RoutingEngine
+from engine.routing_engine import RoutingEngine
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
