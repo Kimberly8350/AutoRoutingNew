@@ -8,6 +8,8 @@ Run: python sync.py
 import os
 import sys
 import time
+import shutil
+import tempfile
 import logging
 import argparse
 from datetime import datetime, timedelta
@@ -37,7 +39,7 @@ EXCEL_FILES = {
     "yard_locations": "Yard_Locations.xlsx",
     "terminal_locations": "terminal_locations.xlsx",
     "site_details": "site_details.xlsx",
-    "driver_schedules": "Auto_Routing_Drivers_Schedule.xlsx",
+    "driver_schedules": "Auto_Routing_Driver_Schedule.xlsx",   # live ODBC file (no 's' in Driver)
     "driver_terminal_cards": "Driver_terminal_cards.xlsx",
     "load_details": "load_details.xlsx",
 }
@@ -88,7 +90,16 @@ def transform_site_details(df: pd.DataFrame) -> list[dict]:
 
 
 def transform_driver_schedules(df: pd.DataFrame) -> list[dict]:
+    df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
+
+    # Normalize CamelCase column names from the live ODBC Excel file to snake_case DB names
+    df = df.rename(columns={
+        "recordid": "record_id",
+        "driverid": "driver_id",
+        "shiftdate": "shift_date",
+    })
+
     df["record_id"] = pd.to_numeric(df["record_id"], errors="coerce")
     df["driver_id"] = pd.to_numeric(df["driver_id"], errors="coerce")
     df = df.dropna(subset=["record_id"])
@@ -111,6 +122,15 @@ def transform_driver_schedules(df: pd.DataFrame) -> list[dict]:
 
     if "max_shift_hours" not in df.columns:
         df["max_shift_hours"] = 12.0
+
+    # Only keep columns that exist in the DB schema — drop extra ODBC columns
+    DB_COLS = {
+        "record_id", "driver_id", "first_name", "last_name", "driver_start_time",
+        "division_prefix", "default_shift_name", "board_location", "yard",
+        "shift_date", "driver_schedule", "attendance_expected", "pump_trained",
+        "max_shift_hours",
+    }
+    df = df[[c for c in df.columns if c in DB_COLS]]
 
     return df.where(pd.notnull(df), None).to_dict("records")
 
@@ -227,12 +247,43 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
         log.warning(f"File not found: {filepath}")
         return {"table": table, "status": "skipped", "reason": "file not found"}
 
+    # Some Excel files are kept open by ODBC connections (permission denied on direct read).
+    # Copy to a temp file first so we can always read the latest refreshed data.
+    tmp_path = None
+    read_path = filepath
     try:
-        df = pd.read_excel(filepath)
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx", prefix=f"sync_{table}_")
+        os.close(tmp_fd)
+        shutil.copy2(filepath, tmp_path)
+        read_path = Path(tmp_path)
+        log.debug(f"Copied {filename} → temp file for reading")
+    except Exception as e:
+        log.warning(f"Could not copy {filename} to temp ({e}); reading directly")
+        read_path = filepath
+        tmp_path = None
+
+    try:
+        df = pd.read_excel(read_path)
         log.info(f"Read {len(df)} rows from {filename}")
     except Exception as e:
         log.error(f"Failed to read {filename}: {e}")
         return {"table": table, "status": "error", "error": str(e)}
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    # For load_details, only sync records from the last 60 days to keep sync fast.
+    # Historical data is already in Supabase; we just need to keep recent loads current.
+    if table == "load_details" and "delivery_date" in df.columns:
+        cutoff = pd.Timestamp(datetime.now() - timedelta(days=60))
+        dates = pd.to_datetime(df["delivery_date"], errors="coerce")
+        original_count = len(df)
+        df = df[dates.isna() | (dates >= cutoff)].copy()
+        log.info(f"load_details: filtered {original_count} → {len(df)} rows (last 60 days)")
+
 
     transform_fn = TRANSFORMERS.get(table)
     if not transform_fn:
