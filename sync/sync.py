@@ -70,13 +70,21 @@ def transform_terminal_locations(df: pd.DataFrame) -> list[dict]:
 
 
 def transform_site_details(df: pd.DataFrame) -> list[dict]:
+    df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
     df["site_id"] = pd.to_numeric(df["site_id"], errors="coerce")
     df = df.dropna(subset=["site_id"])
     df["site_id"] = df["site_id"].astype(int)
+    # Drop rows missing site_name (NOT NULL in DB)
+    df = df.dropna(subset=["site_name"])
     df["zip"] = df["zip"].astype(str).str.strip()
+    # Clamp pump_certified to 0 or 1 — any value outside that range maps to 0
     df["pump_certified"] = pd.to_numeric(df["pump_certified"], errors="coerce").fillna(0).astype(int)
-    return df.where(pd.notnull(df), None).to_dict("records")
+    df["pump_certified"] = df["pump_certified"].apply(lambda x: 1 if x == 1 else 0)
+    # Replace all NaN/NA/inf with None to avoid JSON serialization errors
+    df = df.replace([float("nan"), float("inf"), float("-inf")], None)
+    records = df.to_dict("records")
+    return [{k: (None if (v != v) else v) for k, v in r.items()} for r in records]
 
 
 def transform_driver_schedules(df: pd.DataFrame) -> list[dict]:
@@ -108,13 +116,18 @@ def transform_driver_schedules(df: pd.DataFrame) -> list[dict]:
 
 
 def transform_driver_terminal_cards(df: pd.DataFrame) -> list[dict]:
+    df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
     df["driver_id"] = pd.to_numeric(df["driver_id"], errors="coerce")
     df["terminal_id"] = pd.to_numeric(df["terminal_id"], errors="coerce")
     df = df.dropna(subset=["driver_id", "terminal_id"])
     df["driver_id"] = df["driver_id"].astype(int)
     df["terminal_id"] = df["terminal_id"].astype(int)
-    return df.where(pd.notnull(df), None).to_dict("records")
+    # Deduplicate within the batch to prevent ON CONFLICT errors
+    df = df.drop_duplicates(subset=["driver_id", "terminal_id"], keep="last")
+    df = df.replace([float("nan"), float("inf"), float("-inf")], None)
+    records = df.to_dict("records")
+    return [{k: (None if (v != v) else v) for k, v in r.items()} for r in records]
 
 
 def _parse_excel_datetime(series: pd.Series) -> pd.Series:
@@ -137,10 +150,19 @@ def _parse_excel_datetime(series: pd.Series) -> pd.Series:
 
 
 def transform_load_details(df: pd.DataFrame) -> list[dict]:
+    df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
     df["ce_id"] = pd.to_numeric(df["ce_id"], errors="coerce")
     df = df.dropna(subset=["ce_id"])
     df["ce_id"] = df["ce_id"].astype(int)
+    # Coerce integer FK columns — non-numeric values (e.g. "T-75-TX-2664") become None
+    for int_col in ["site_id", "terminal_id", "load_status"]:
+        if int_col in df.columns:
+            df[int_col] = pd.to_numeric(df[int_col], errors="coerce")
+            # Convert valid floats (e.g. 2.0) to int, leave NaN as None
+            df[int_col] = df[int_col].apply(
+                lambda x: int(x) if pd.notna(x) else None
+            )
 
     for dt_col in ["window_start", "window_end", "delivery_eta", "arrived_at_rack",
                    "left_rack", "arrived_at_site"]:
@@ -154,17 +176,35 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
         )
 
     if "load_status" in df.columns:
-        df["load_status"] = pd.to_numeric(df["load_status"], errors="coerce").astype("Int64")
+        df["load_status"] = pd.to_numeric(df["load_status"], errors="coerce").apply(
+            lambda x: int(x) if pd.notna(x) else None
+        )
 
-    # Derive is_anytime: window_start 00:00 and window_end 23:00
-    if "window_start" in df.columns and "window_end" in df.columns:
-        def is_anytime(row):
-            ws = str(row.get("window_start") or "")
-            we = str(row.get("window_end") or "")
-            return 1 if ("T00:00" in ws and "T23:00" in we) else 0
-        df["is_anytime"] = df.apply(is_anytime, axis=1)
+    # Drop is_anytime — it's derived on read, not stored as a column in the DB
+    if "is_anytime" in df.columns:
+        df = df.drop(columns=["is_anytime"])
 
-    return df.where(pd.notnull(df), None).to_dict("records")
+    # Deduplicate on PK to avoid ON CONFLICT batch errors
+    df = df.drop_duplicates(subset=["ce_id", "product_name"], keep="last")
+
+    df = df.replace([float("nan"), float("inf"), float("-inf")], None)
+    records = df.to_dict("records")
+
+    # Final pass: force integer types for all known DB integer columns
+    # (guards against pandas CoW keeping float dtype on object columns)
+    LOAD_INT_COLS = {"ce_id", "site_id", "terminal_id", "load_status"}
+    cleaned = []
+    for r in records:
+        row = {}
+        for k, v in r.items():
+            if v != v or v is None:  # NaN or None → None
+                row[k] = None
+            elif k in LOAD_INT_COLS and isinstance(v, float):
+                row[k] = int(v)
+            else:
+                row[k] = v
+        cleaned.append(row)
+    return cleaned
 
 
 TRANSFORMERS = {
@@ -207,13 +247,21 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
     if not records:
         return {"table": table, "status": "ok", "rows_upserted": 0}
 
+    # Tables with composite unique keys need explicit conflict targets
+    ON_CONFLICT = {
+        "driver_terminal_cards": "driver_id,terminal_id",
+        "load_details": "ce_id,product_name",
+    }
+
     try:
         # Upsert in chunks to avoid request size limits
         chunk_size = 500
         total_upserted = 0
+        conflict_col = ON_CONFLICT.get(table)
         for i in range(0, len(records), chunk_size):
             chunk = records[i : i + chunk_size]
-            client.table(table).upsert(chunk).execute()
+            q = client.table(table).upsert(chunk, on_conflict=conflict_col) if conflict_col else client.table(table).upsert(chunk)
+            q.execute()
             total_upserted += len(chunk)
 
         duration_ms = int((time.time() - start) * 1000)
