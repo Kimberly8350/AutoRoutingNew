@@ -296,7 +296,6 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
         df = df[dates.isna() | (dates >= cutoff)].copy()
         log.info(f"load_details: filtered {original_count} → {len(df)} rows (last 60 days)")
 
-
     transform_fn = TRANSFORMERS.get(table)
     if not transform_fn:
         return {"table": table, "status": "error", "error": "No transformer defined"}
@@ -317,6 +316,21 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
     }
 
     try:
+        # For load_details: skip any records that are already manually set to
+        # load_status=1 in Supabase — those are "ready to route" and should not
+        # be overwritten by a fresh ODBC pull until dispatch processes them.
+        if table == "load_details" and records:
+            locked_rows = client.table("load_details").select("ce_id,product_name") \
+                .eq("load_status", 1).execute().data
+            locked_keys = {(r["ce_id"], r["product_name"]) for r in locked_rows}
+            if locked_keys:
+                before = len(records)
+                records = [
+                    r for r in records
+                    if (r.get("ce_id"), r.get("product_name")) not in locked_keys
+                ]
+                log.info(f"load_details: skipping {before - len(records)} locked (status=1) rows")
+
         # Upsert in chunks to avoid request size limits
         chunk_size = 500
         total_upserted = 0
