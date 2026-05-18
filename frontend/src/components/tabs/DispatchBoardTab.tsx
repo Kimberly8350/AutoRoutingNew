@@ -113,11 +113,18 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
     setBoards(boardGroups)
     setUnassigned(ua || [])
 
-    const totalAssigned = Object.values(driverMap).reduce((s, d) => s + d.loads.length, 0)
+    // Only count loads whose delivery_date matches the selected date.
+    // The routing engine processes ±1 day, so dispatch_results and
+    // unassigned_loads can contain loads from adjacent dates.
+    const todayCeIds = new Set(Object.keys(loadMap).map(Number))
+    const totalAssigned = Object.values(driverMap).reduce(
+      (s, d) => s + d.loads.filter(l => todayCeIds.has(l.ce_id)).length, 0
+    )
+    const todayUnassigned = (ua || []).filter((u: any) => todayCeIds.has(u.ce_id))
     setTotals({
-      total: (loads || []).length + (ua || []).length,
+      total: todayCeIds.size,
       assigned: totalAssigned,
-      unassigned: (ua || []).length,
+      unassigned: todayUnassigned.length,
     })
   }
 
