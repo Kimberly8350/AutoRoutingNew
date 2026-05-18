@@ -41,7 +41,12 @@ EXCEL_FILES = {
     "site_details": "site_details.xlsx",
     "driver_schedules": "Auto_Routing_Driver_Schedule.xlsx",   # live ODBC file (no 's' in Driver)
     "driver_terminal_cards": "Driver_terminal_cards.xlsx",
-    "load_details": "load_details.xlsx",
+    "load_details": "Loads Feed for Kim.xlsx",
+}
+
+# Some Excel files have multiple sheets; specify which sheet to read for each table.
+SHEET_NAMES = {
+    "load_details": "Main",
 }
 
 
@@ -184,6 +189,17 @@ def _parse_excel_datetime(series: pd.Series) -> pd.Series:
 def transform_load_details(df: pd.DataFrame) -> list[dict]:
     df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
+
+    # Normalize column names from the new "Loads Feed for Kim.xlsx" Main sheet
+    # to match the DB schema (handles both old load_details.xlsx and new feed).
+    df = df.rename(columns={
+        "customer":            "customer_name",   # was Customer
+        "gallons_ordered":     "gross_gallons",   # was Gallons_Ordered
+        "start_window":        "window_start",    # was Start_Window
+        "end_window":          "window_end",      # was End_Window
+        "arrived_at_rack_time": "arrived_at_rack", # was Arrived_at_Rack_Time
+    })
+
     df["ce_id"] = pd.to_numeric(df["ce_id"], errors="coerce")
     df = df.dropna(subset=["ce_id"])
     df["ce_id"] = df["ce_id"].astype(int)
@@ -215,6 +231,16 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
     # Drop is_anytime — it's derived on read, not stored as a column in the DB
     if "is_anytime" in df.columns:
         df = df.drop(columns=["is_anytime"])
+
+    # Only keep columns that exist in the DB schema — drop extras like customer_id
+    DB_COLS = {
+        "ce_id", "delivery_date", "customer_name", "order_number", "site_id",
+        "terminal_id", "terminal_name", "product_name", "gross_gallons",
+        "load_status_description", "city", "state", "site_name", "site_address",
+        "first_name", "last_name", "window_start", "window_end", "delivery_eta",
+        "load_status", "arrived_at_rack", "left_rack", "arrived_at_site",
+    }
+    df = df[[c for c in df.columns if c in DB_COLS]]
 
     # Deduplicate on PK to avoid ON CONFLICT batch errors
     df = df.drop_duplicates(subset=["ce_id", "product_name"], keep="last")
@@ -275,8 +301,9 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
         tmp_path = None
 
     try:
-        df = pd.read_excel(read_path)
-        log.info(f"Read {len(df)} rows from {filename}")
+        sheet = SHEET_NAMES.get(table, 0)  # default 0 = first sheet
+        df = pd.read_excel(read_path, sheet_name=sheet)
+        log.info(f"Read {len(df)} rows from {filename}" + (f" (sheet: {sheet!r})" if sheet != 0 else ""))
     except Exception as e:
         log.error(f"Failed to read {filename}: {e}")
         return {"table": table, "status": "error", "error": str(e)}
@@ -289,12 +316,15 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
 
     # For load_details, only sync records from the last 60 days to keep sync fast.
     # Historical data is already in Supabase; we just need to keep recent loads current.
-    if table == "load_details" and "delivery_date" in df.columns:
-        cutoff = pd.Timestamp(datetime.now() - timedelta(days=60))
-        dates = pd.to_datetime(df["delivery_date"], errors="coerce")
-        original_count = len(df)
-        df = df[dates.isna() | (dates >= cutoff)].copy()
-        log.info(f"load_details: filtered {original_count} → {len(df)} rows (last 60 days)")
+    # Use case-insensitive column lookup so this works with both old and new file formats.
+    if table == "load_details":
+        date_col = next((c for c in df.columns if c.lower().strip() == "delivery_date"), None)
+        if date_col:
+            cutoff = pd.Timestamp(datetime.now() - timedelta(days=60))
+            dates = pd.to_datetime(df[date_col], errors="coerce")
+            original_count = len(df)
+            df = df[dates.isna() | (dates >= cutoff)].copy()
+            log.info(f"load_details: filtered {original_count} → {len(df)} rows (last 60 days)")
 
     transform_fn = TRANSFORMERS.get(table)
     if not transform_fn:

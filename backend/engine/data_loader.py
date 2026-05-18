@@ -28,12 +28,17 @@ def _parse_time(val) -> Optional[time]:
 
 
 def _parse_dt(val) -> Optional[datetime]:
+    """Parse a datetime value and always return a timezone-naive datetime.
+    The routing engine builds shift times as naive datetimes, so all window
+    timestamps must be naive to avoid offset-naive vs offset-aware comparisons.
+    """
     if not val:
         return None
     if isinstance(val, datetime):
-        return val
+        return val.replace(tzinfo=None)
     try:
-        return datetime.fromisoformat(str(val))
+        dt = datetime.fromisoformat(str(val))
+        return dt.replace(tzinfo=None)
     except Exception:
         return None
 
@@ -207,6 +212,14 @@ def load_loads_for_date(
         )
         all_rows.extend(rows)
 
+    # Build terminal name → terminal_id lookup so loads with terminal_id=0
+    # can still be matched to the right terminal by name from the ODBC data.
+    term_rows = client.table("terminal_locations").select("terminal_id, terminal_name").execute().data
+    terminal_name_map: dict[str, int] = {
+        r["terminal_name"].lower().strip(): r["terminal_id"]
+        for r in term_rows if r.get("terminal_name")
+    }
+
     # Group by ce_id
     ce_map: dict[int, dict] = {}
     for r in all_rows:
@@ -223,14 +236,21 @@ def load_loads_for_date(
 
     loads = []
     for ce, r in ce_map.items():
+        # Resolve terminal_id by name first (ODBC terminal IDs differ from our DB IDs).
+        # Name-based lookup is authoritative; fall back to stored ID only if no name match.
+        terminal_name = r.get("terminal_name") or ""
+        terminal_id = terminal_name_map.get(terminal_name.lower().strip(), 0)
+        if terminal_id == 0:
+            terminal_id = int(r.get("terminal_id") or 0)
+
         load = Load(
             ce_id=ce,
             delivery_date=str(r.get("delivery_date") or "")[:10],
             customer_name=r.get("customer_name") or "",
             order_number=r.get("order_number"),
             site_id=int(r.get("site_id") or 0),
-            terminal_id=int(r.get("terminal_id") or 0),
-            terminal_name=r.get("terminal_name") or "",
+            terminal_id=terminal_id,
+            terminal_name=terminal_name,
             products=r["products"],
             load_status=int(r.get("load_status") or 0),
             city=r.get("city") or "",
