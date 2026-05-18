@@ -304,6 +304,32 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
         sheet = SHEET_NAMES.get(table, 0)  # default 0 = first sheet
         df = pd.read_excel(read_path, sheet_name=sheet)
         log.info(f"Read {len(df)} rows from {filename}" + (f" (sheet: {sheet!r})" if sheet != 0 else ""))
+
+        # For load_details: merge terminal names and driver names from the
+        # "Driver & Terminal" sheet (BillOfLadingId = CE_ID join on product).
+        if table == "load_details":
+            try:
+                dt = pd.read_excel(read_path, sheet_name="Driver & Terminal")
+                dt = dt.rename(columns={
+                    "BillOfLadingId": "CE_ID",
+                    "TerminalName":   "_dt_terminal_name",
+                    "ProductName":    "Product_Name",
+                    "FName":          "_dt_first_name",
+                    "LName":          "_dt_last_name",
+                })
+                dt = dt[["CE_ID", "Product_Name", "_dt_terminal_name",
+                          "_dt_first_name", "_dt_last_name"]].drop_duplicates(
+                    subset=["CE_ID", "Product_Name"], keep="first"
+                )
+                df = df.merge(dt, on=["CE_ID", "Product_Name"], how="left")
+                # Fill blanks in Main sheet with values from Driver & Terminal sheet
+                df["Terminal_Name"] = df["Terminal_Name"].fillna(df["_dt_terminal_name"])
+                df["First_Name"]    = df["First_Name"].fillna(df["_dt_first_name"])
+                df["Last_Name"]     = df["Last_Name"].fillna(df["_dt_last_name"])
+                df = df.drop(columns=["_dt_terminal_name", "_dt_first_name", "_dt_last_name"])
+                log.info(f"load_details: merged Driver & Terminal sheet ({len(dt)} rows)")
+            except Exception as e:
+                log.warning(f"load_details: could not merge Driver & Terminal sheet: {e}")
     except Exception as e:
         log.error(f"Failed to read {filename}: {e}")
         return {"table": table, "status": "error", "error": str(e)}

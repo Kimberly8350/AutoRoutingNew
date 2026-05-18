@@ -216,8 +216,8 @@ def load_loads_for_date(
     # can still be matched to the right terminal by name from the ODBC data.
     term_rows = client.table("terminal_locations").select("terminal_id, terminal_name").execute().data
     terminal_name_map: dict[str, int] = {
-        r["terminal_name"].lower().strip(): r["terminal_id"]
-        for r in term_rows if r.get("terminal_name")
+        r["terminal_name"].lower().strip(): int(r["terminal_id"])
+        for r in term_rows if r.get("terminal_name") and r.get("terminal_id")
     }
 
     # Group by ce_id
@@ -234,14 +234,54 @@ def load_loads_for_date(
         if product:
             ce_map[ce]["products"].append(LoadProduct(product_name=product, gross_gallons=gallons))
 
+    # Build site_id → terminal_id fallback map from historical load_details.
+    # Loads from the new feed often have no terminal assigned yet (future orders);
+    # we infer the most-recently-used terminal for that site as a best guess.
+    site_terminal_fallback: dict[int, int] = {}
+    try:
+        hist_rows = (
+            client.table("load_details")
+            .select("site_id,terminal_name")
+            .not_.is_("terminal_name", "null")
+            .neq("terminal_name", "")
+            .execute()
+            .data
+        )
+        from collections import Counter
+        site_term_counts: dict[int, Counter] = {}
+        for hr in hist_rows:
+            sid = hr.get("site_id")
+            tname = (hr.get("terminal_name") or "").lower().strip()
+            tid = terminal_name_map.get(tname, 0)
+            if sid and tid:
+                site_term_counts.setdefault(int(sid), Counter())[tid] += 1
+        site_terminal_fallback = {
+            sid: cnt.most_common(1)[0][0]
+            for sid, cnt in site_term_counts.items()
+        }
+        log.info(f"Built site→terminal fallback map for {len(site_terminal_fallback)} sites")
+    except Exception as e:
+        log.warning(f"Could not build site→terminal fallback: {e}")
+
     loads = []
     for ce, r in ce_map.items():
         # Resolve terminal_id by name first (ODBC terminal IDs differ from our DB IDs).
         # Name-based lookup is authoritative; fall back to stored ID only if no name match.
         terminal_name = r.get("terminal_name") or ""
         terminal_id = terminal_name_map.get(terminal_name.lower().strip(), 0)
+        # Supabase may return terminal_id as a string — always coerce to int
         if terminal_id == 0:
-            terminal_id = int(r.get("terminal_id") or 0)
+            raw_tid = r.get("terminal_id")
+            try:
+                terminal_id = int(raw_tid) if raw_tid not in (None, "", "None") else 0
+            except (ValueError, TypeError):
+                terminal_id = 0
+        # Last resort: infer terminal from historical deliveries to this site
+        if terminal_id == 0:
+            site_id = int(r.get("site_id") or 0)
+            terminal_id = site_terminal_fallback.get(site_id, 0)
+            if terminal_id:
+                log.debug(f"ce_id={ce}: inferred terminal_id={terminal_id} from site history")
 
         load = Load(
             ce_id=ce,
