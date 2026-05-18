@@ -81,6 +81,9 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
           ...load,
           sequence: row.route_sequence,
           eta: row.eta,
+          // Prefer values from dispatch_results (routing engine) over load_details
+          terminal_name: row.terminal_name || load.terminal_name || '',
+          site_city: row.site_city || load.city || load.site_city || '',
         })
       }
     }

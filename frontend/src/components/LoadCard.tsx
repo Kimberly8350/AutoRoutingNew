@@ -135,9 +135,9 @@ export function LoadCard({ load, isDragging }: Props) {
               {formatWindow(load.window_start, load.window_end)}
             </span>
           </div>
-          <div>
+          <div style={{ gridColumn: '1 / -1' }}>
             <span style={{ color: 'var(--text-dim)' }}>Term: </span>
-            <span style={{ color: 'var(--text-muted)' }}>{load.terminal_name?.split(' ').slice(-1)[0] || '—'}</span>
+            <span style={{ color: 'var(--text-muted)' }}>{load.terminal_name || '—'}</span>
           </div>
           <div>
             <span style={{ color: 'var(--text-dim)' }}>Product: </span>
