@@ -387,8 +387,67 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
     results = client.table("dispatch_results").select("*").eq("dispatch_date", dispatch_date).execute().data
     unassigned = client.table("unassigned_loads").select("*").eq("dispatch_date", dispatch_date).execute().data
     loads = client.table("load_details").select("*").eq("delivery_date", dispatch_date).execute().data
+
+    # Build pre-assigned rows: loads already in progress or delivered that
+    # have a driver name in the source data. These show on the board
+    # regardless of whether the routing engine has been run.
+    pre_assigned_loads = (
+        client.table("load_details")
+        .select("ce_id,first_name,last_name,load_status,site_name,site_address,city,terminal_name,delivery_eta,window_start,window_end,product_name,gross_gallons,customer_name,order_number")
+        .eq("delivery_date", dispatch_date)
+        .gt("load_status", 1)
+        .not_.is_("first_name", "null")
+        .execute()
+        .data
+    )
+
+    # Load driver_schedules for the date to resolve name → driver_id / board_location
+    driver_rows = (
+        client.table("driver_schedules")
+        .select("driver_id,first_name,last_name,board_location")
+        .eq("shift_date", dispatch_date)
+        .execute()
+        .data
+    )
+    driver_name_map: dict[str, dict] = {
+        f"{d['first_name']} {d['last_name']}".strip().lower(): d
+        for d in driver_rows
+        if d.get("first_name") and d.get("last_name")
+    }
+
+    # Deduplicate by ce_id (one row per load, not per product),
+    # skip any ce_id already covered by dispatch_results
+    dispatched_ce_ids = {r["ce_id"] for r in results}
+    seen: set[int] = set()
+    pre_assigned: list[dict] = []
+    for load in sorted(pre_assigned_loads, key=lambda r: r.get("delivery_eta") or ""):
+        ce_id = load.get("ce_id")
+        if ce_id is None or ce_id in dispatched_ce_ids or ce_id in seen:
+            continue
+        seen.add(ce_id)
+        fname = (load.get("first_name") or "").strip()
+        lname = (load.get("last_name") or "").strip()
+        driver = driver_name_map.get(f"{fname} {lname}".lower())
+        if not driver:
+            continue
+        pre_assigned.append({
+            "dispatch_date": dispatch_date,
+            "driver_id": driver["driver_id"],
+            "driver_name": f"{driver['first_name']} {driver['last_name']}",
+            "board_location": driver.get("board_location"),
+            "ce_id": ce_id,
+            "route_sequence": None,
+            "terminal_name": load.get("terminal_name") or "",
+            "site_name": load.get("site_name") or "",
+            "site_city": load.get("city") or "",
+            "eta": load.get("delivery_eta"),
+            "load_status": load.get("load_status"),
+            "pre_assigned": True,
+        })
+
     return {
         "dispatch_results": results,
+        "pre_assigned": pre_assigned,
         "unassigned": unassigned,
         "loads": loads,
     }

@@ -56,7 +56,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
   useEffect(() => { fetchBoard() }, [fetchBoard])
 
   function buildBoards(data: any) {
-    const { dispatch_results, unassigned: ua, loads } = data
+    const { dispatch_results, pre_assigned, unassigned: ua, loads } = data
 
     // Build load map for quick lookup
     const loadMap: Record<number, any> = {}
@@ -81,11 +81,37 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
           ...load,
           sequence: row.route_sequence,
           eta: row.eta,
-          // Prefer values from dispatch_results (routing engine) over load_details
           terminal_name: row.terminal_name || load.terminal_name || '',
           site_city: row.site_city || load.city || load.site_city || '',
         })
       }
+    }
+
+    // Merge pre-assigned loads (status > 1, already delivered/in-progress)
+    // These appear at the top of the driver's column before routed loads.
+    const preAssignedCeIds = new Set<number>()
+    for (const row of (pre_assigned || [])) {
+      preAssignedCeIds.add(row.ce_id)
+      if (!driverMap[row.driver_id]) {
+        driverMap[row.driver_id] = {
+          driver_id: row.driver_id,
+          driver_name: row.driver_name,
+          board_location: row.board_location,
+          loads: [],
+        }
+      }
+      const load = loadMap[row.ce_id]
+      driverMap[row.driver_id].loads.unshift({
+        ...(load || {}),
+        ce_id: row.ce_id,
+        site_name: row.site_name || load?.site_name || '',
+        site_city: row.site_city || load?.city || '',
+        terminal_name: row.terminal_name || load?.terminal_name || '',
+        load_status: row.load_status ?? load?.load_status,
+        eta: row.eta,
+        sequence: undefined,
+        pre_assigned: true,
+      })
     }
 
     // Sort loads by sequence within each driver
