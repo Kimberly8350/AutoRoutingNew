@@ -83,7 +83,16 @@ def load_terminals(client: Client) -> dict[int, Terminal]:
 
 
 def load_sites(client: Client) -> dict[int, Site]:
-    rows = client.table("site_details").select("*").execute().data
+    # Supabase default page limit is 1000 — paginate to fetch all sites.
+    rows = []
+    page_size = 1000
+    offset = 0
+    while True:
+        batch = client.table("site_details").select("*").range(offset, offset + page_size - 1).execute().data
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
     sites = {}
     for r in rows:
         sid = r.get("site_id")
