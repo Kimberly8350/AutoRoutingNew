@@ -307,29 +307,48 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
 
         # For load_details: merge terminal names and driver names from the
         # "Driver & Terminal" sheet (BillOfLadingId = CE_ID join on product).
+        # Normalize both sheets to lowercase column names before merging so the
+        # join works regardless of how the Excel file delivers the header casing.
         if table == "load_details":
             try:
                 dt = pd.read_excel(read_path, sheet_name="Driver & Terminal")
+                # Lowercase both DataFrames before any name-dependent operations
+                df.columns  = [c.strip().lower() for c in df.columns]
+                dt.columns  = [c.strip().lower() for c in dt.columns]
+                # Map Driver & Terminal sheet columns → working names
                 dt = dt.rename(columns={
-                    "BillOfLadingId": "CE_ID",
-                    "TerminalName":   "_dt_terminal_name",
-                    "ProductName":    "Product_Name",
-                    "FName":          "_dt_first_name",
-                    "LName":          "_dt_last_name",
+                    "billoflading_id": "ce_id",   # try common casing variants below
+                    "billoflading id": "ce_id",
+                    "bill_of_lading_id": "ce_id",
+                    "billofladingid": "ce_id",
+                    "terminalname":  "_dt_terminal_name",
+                    "terminal_name": "_dt_terminal_name",
+                    "productname":   "product_name",
+                    "product_name":  "product_name",
+                    "fname":         "_dt_first_name",
+                    "first_name":    "_dt_first_name",
+                    "lname":         "_dt_last_name",
+                    "last_name":     "_dt_last_name",
                 })
-                dt = dt[["CE_ID", "Product_Name", "_dt_terminal_name",
-                          "_dt_first_name", "_dt_last_name"]].drop_duplicates(
-                    subset=["CE_ID", "Product_Name"], keep="first"
-                )
-                df = df.merge(dt, on=["CE_ID", "Product_Name"], how="left")
+                # Also handle main sheet's ce_id / product_name in lowercase
+                keep_cols = [c for c in ["ce_id", "product_name", "_dt_terminal_name",
+                                          "_dt_first_name", "_dt_last_name"] if c in dt.columns]
+                dt = dt[keep_cols].drop_duplicates(subset=["ce_id", "product_name"], keep="first") \
+                    if "ce_id" in dt.columns and "product_name" in dt.columns \
+                    else dt[keep_cols]
+                df = df.merge(dt, on=["ce_id", "product_name"], how="left")
                 # Fill blanks in Main sheet with values from Driver & Terminal sheet
-                df["Terminal_Name"] = df["Terminal_Name"].fillna(df["_dt_terminal_name"])
-                df["First_Name"]    = df["First_Name"].fillna(df["_dt_first_name"])
-                df["Last_Name"]     = df["Last_Name"].fillna(df["_dt_last_name"])
-                df = df.drop(columns=["_dt_terminal_name", "_dt_first_name", "_dt_last_name"])
+                for src, dst in [("_dt_terminal_name", "terminal_name"),
+                                  ("_dt_first_name",    "first_name"),
+                                  ("_dt_last_name",     "last_name")]:
+                    if src in df.columns and dst in df.columns:
+                        df[dst] = df[dst].fillna(df[src])
+                        df = df.drop(columns=[src])
                 log.info(f"load_details: merged Driver & Terminal sheet ({len(dt)} rows)")
             except Exception as e:
                 log.warning(f"load_details: could not merge Driver & Terminal sheet: {e}")
+                # Ensure columns are still lowercased even if merge failed
+                df.columns = [c.strip().lower() for c in df.columns]
     except Exception as e:
         log.error(f"Failed to read {filename}: {e}")
         return {"table": table, "status": "error", "error": str(e)}

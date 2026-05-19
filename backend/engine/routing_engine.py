@@ -107,14 +107,14 @@ class RoutingEngine:
         site = load.site
         if site and site.pump_certified and not driver.pump_trained:
             return "No feasible assignment: Pump certification required."
-        # Terminal access
-        if load.terminal_id not in driver.terminal_ids:
+        # Terminal access — terminal_id=0 means unknown, treat as no access
+        if not load.terminal_id or load.terminal_id not in driver.terminal_ids:
             return "No eligible terminal: Driver has no terminal access."
         # Site restriction
         if site and site.site_id in driver.restricted_site_ids:
             return "No feasible assignment: Driver restricted from this site."
-        # Customer restriction
-        if load.customer_name in driver.restricted_customer_groups:
+        # Customer group restriction — compare the site's group name, not the raw customer name
+        if site and site.customer_group_name and site.customer_group_name in driver.restricted_customer_groups:
             return "No feasible assignment: Driver restricted from this site."
         return None
 
@@ -338,11 +338,15 @@ class RoutingEngine:
             load.site = self.sites.get(load.site_id)
             load.terminal = self.terminals.get(load.terminal_id)
 
-        # Filter deliverable loads (today ± 1 day)
+        # Filter deliverable loads (today ± 1 day).
+        # Only route loads that are unscheduled (status=1) or have no status set —
+        # anything above status 1 is already in motion (dispatched, en route, delivered)
+        # and belongs in the pre-assigned panel, not the routing queue.
         today = self.dispatch_date
         eligible_loads = [
             l for l in self.loads
             if l.delivery_date and abs((date.fromisoformat(l.delivery_date) - today).days) <= 1
+            and (l.load_status is None or l.load_status <= 1)
         ]
 
         # Validate each load

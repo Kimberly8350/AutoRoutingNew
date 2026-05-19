@@ -114,9 +114,15 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
       })
     }
 
-    // Sort loads by sequence within each driver
+    // Sort loads within each driver: pre-assigned (in-progress/delivered) first,
+    // then routed loads in sequence order.
     for (const col of Object.values(driverMap)) {
-      col.loads.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+      col.loads.sort((a, b) => {
+        const aPA = (a as any).pre_assigned ? 0 : 1
+        const bPA = (b as any).pre_assigned ? 0 : 1
+        if (aPA !== bPA) return aPA - bPA
+        return (a.sequence ?? 0) - (b.sequence ?? 0)
+      })
     }
 
     // Group drivers by board location

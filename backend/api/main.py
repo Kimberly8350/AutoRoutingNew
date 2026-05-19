@@ -135,7 +135,12 @@ async def run_dispatch(
         reroute=req.reroute,
     )
 
-    result = engine.run()
+    # Run engine in a thread pool so asyncio's event loop is NOT running inside
+    # the engine — this allows get_travel_mins_sync to call the Google Maps API
+    # via loop.run_until_complete() rather than always falling back to haversine.
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, engine.run)
 
     # Persist results to Supabase in background
     background_tasks.add_task(persist_dispatch_result, client, result, user)
@@ -386,20 +391,45 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
     client = get_supabase()
     results = client.table("dispatch_results").select("*").eq("dispatch_date", dispatch_date).execute().data
     unassigned = client.table("unassigned_loads").select("*").eq("dispatch_date", dispatch_date).execute().data
-    loads = client.table("load_details").select("*").eq("delivery_date", dispatch_date).execute().data
+
+    # Paginate load_details — Supabase default page limit is 1000 rows
+    loads = []
+    _page_size = 1000
+    _offset = 0
+    while True:
+        _batch = (
+            client.table("load_details")
+            .select("*")
+            .eq("delivery_date", dispatch_date)
+            .range(_offset, _offset + _page_size - 1)
+            .execute()
+            .data
+        )
+        loads.extend(_batch)
+        if len(_batch) < _page_size:
+            break
+        _offset += _page_size
 
     # Build pre-assigned rows: loads already in progress or delivered that
     # have a driver name in the source data. These show on the board
     # regardless of whether the routing engine has been run.
-    pre_assigned_loads = (
-        client.table("load_details")
-        .select("ce_id,first_name,last_name,load_status,site_name,site_address,city,terminal_name,delivery_eta,window_start,window_end,product_name,gross_gallons,customer_name,order_number")
-        .eq("delivery_date", dispatch_date)
-        .gt("load_status", 1)
-        .not_.is_("first_name", "null")
-        .execute()
-        .data
-    )
+    pre_assigned_loads = []
+    _pa_offset = 0
+    while True:
+        _pa_batch = (
+            client.table("load_details")
+            .select("ce_id,first_name,last_name,load_status,site_name,site_address,city,terminal_name,delivery_eta,window_start,window_end,product_name,gross_gallons,customer_name,order_number")
+            .eq("delivery_date", dispatch_date)
+            .gt("load_status", 1)
+            .not_.is_("first_name", "null")
+            .range(_pa_offset, _pa_offset + 999)
+            .execute()
+            .data
+        )
+        pre_assigned_loads.extend(_pa_batch)
+        if len(_pa_batch) < 1000:
+            break
+        _pa_offset += 1000
 
     # Load driver_schedules for the date to resolve name → driver_id / board_location
     driver_rows = (

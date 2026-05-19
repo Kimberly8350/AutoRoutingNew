@@ -114,7 +114,21 @@ def load_sites(client: Client) -> dict[int, Site]:
 
 def load_driver_terminal_access(client: Client) -> dict[int, set]:
     """Returns {driver_id: {terminal_id, ...}}"""
-    rows = client.table("driver_terminal_cards").select("driver_id, terminal_id").execute().data
+    rows = []
+    page_size = 1000
+    offset = 0
+    while True:
+        batch = (
+            client.table("driver_terminal_cards")
+            .select("driver_id, terminal_id")
+            .range(offset, offset + page_size - 1)
+            .execute()
+            .data
+        )
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
     access = {}
     for r in rows:
         did = r.get("driver_id")
@@ -248,14 +262,23 @@ def load_loads_for_date(
     # we infer the most-recently-used terminal for that site as a best guess.
     site_terminal_fallback: dict[int, int] = {}
     try:
-        hist_rows = (
-            client.table("load_details")
-            .select("site_id,terminal_name")
-            .not_.is_("terminal_name", "null")
-            .neq("terminal_name", "")
-            .execute()
-            .data
-        )
+        hist_rows = []
+        _page_size = 1000
+        _offset = 0
+        while True:
+            _batch = (
+                client.table("load_details")
+                .select("site_id,terminal_name")
+                .not_.is_("terminal_name", "null")
+                .neq("terminal_name", "")
+                .range(_offset, _offset + _page_size - 1)
+                .execute()
+                .data
+            )
+            hist_rows.extend(_batch)
+            if len(_batch) < _page_size:
+                break
+            _offset += _page_size
         from collections import Counter
         site_term_counts: dict[int, Counter] = {}
         for hr in hist_rows:
