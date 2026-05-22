@@ -30,9 +30,8 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app = FastAPI(title="AutoRouting API", version="1.0.0")
 
-# Build allowed origins list. Includes the configured FRONTEND_URL, localhost,
-# and any extra origins from the EXTRA_CORS_ORIGINS env var (comma-separated).
-# To allow all Vercel preview deployments, add them to EXTRA_CORS_ORIGINS on Render.
+# Allowed origins: explicit list + regex for all Vercel preview deployments.
+# Starlette 0.47+ supports allow_origin_regex alongside allow_origins.
 _allowed_origins = list({
     FRONTEND_URL,
     "http://localhost:3000",
@@ -43,6 +42,7 @@ _allowed_origins = list({
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=r"https://[a-zA-Z0-9\-]+-rack-point\.vercel\.app|https://[a-zA-Z0-9\-]+\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
