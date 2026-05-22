@@ -564,7 +564,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
                       const sched = col as any
                       const notWorking = sched.attendance_expected === 0
                       const unscheduled = sched.attendance_expected === null
-                      const confirmed = sched.attendance_confirmed === 1 || sched.attendance_confirmed === true
+                      const confirmed = false // attendance_confirmed column not yet in DB
                       const isException = notWorking || unscheduled
                       return (
                         <div style={{

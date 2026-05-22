@@ -443,7 +443,7 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
     # so the board can render every driver column and flag exceptions.
     driver_rows = (
         client.table("driver_schedules")
-        .select("driver_id,first_name,last_name,board_location,attendance_expected,driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours,attendance_confirmed")
+        .select("driver_id,first_name,last_name,board_location,attendance_expected,driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours")
         .eq("shift_date", dispatch_date)
         .execute()
         .data
