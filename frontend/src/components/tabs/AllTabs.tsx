@@ -51,17 +51,17 @@ export function TerminalAccessTab() {
     } catch (e: any) { setError(e.message) }
   }
 
-  // Group access by terminal
-  const byTerminal: Record<string, any[]> = {}
+  // Group access by terminal_id (numeric key)
+  const byTerminal: Record<number, { name: string; abbr: string; drivers: any[] }> = {}
   for (const a of access) {
-    const key = `${a.terminal_id}:${a.terminal_name}`
-    if (!byTerminal[key]) byTerminal[key] = []
-    byTerminal[key].push(a)
+    const tid = a.terminal_id
+    if (!byTerminal[tid]) byTerminal[tid] = { name: a.terminal_name, abbr: a.terminal_abbreviation, drivers: [] }
+    byTerminal[tid].drivers.push(a)
   }
 
-  const filtered = Object.entries(byTerminal).filter(([key]) =>
-    !search || key.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = Object.entries(byTerminal)
+    .filter(([, t]) => !search || t.name.toLowerCase().includes(search.toLowerCase()))
+    .sort(([, a], [, b]) => a.name.localeCompare(b.name))
 
   return (
     <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
@@ -88,54 +88,62 @@ export function TerminalAccessTab() {
       <input value={search} onChange={e => setSearch(e.target.value)}
         placeholder="Search terminals..." style={{ ...inputStyle, width: '300px', marginBottom: '16px' }} />
 
+      <div style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-mono)', marginBottom: '12px' }}>
+        {filtered.length} terminals · {access.length} total access records
+      </div>
+
       {/* Terminal list */}
       {loading ? (
         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Loading...</div>
-      ) : filtered.map(([key, drivers]) => {
-        const [tid, tname] = key.split(':')
-        return (
-          <div key={key} style={{
-            background: 'var(--surface-raised)', border: '1px solid var(--border)',
-            borderRadius: '8px', marginBottom: '12px', overflow: 'hidden',
+      ) : filtered.map(([tid, terminal]) => (
+        <div key={tid} style={{
+          background: 'var(--surface-raised)', border: '1px solid var(--border)',
+          borderRadius: '8px', marginBottom: '12px', overflow: 'hidden',
+        }}>
+          <div style={{
+            padding: '10px 14px',
+            background: 'var(--surface-overlay)',
+            borderBottom: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <div style={{
-              padding: '10px 14px',
-              background: 'var(--surface-overlay)',
-              borderBottom: '1px solid var(--border)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            }}>
-              <div>
-                <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: '13px' }}>{tname}</span>
-                <span style={{ color: 'var(--text-dim)', fontSize: '11px', fontFamily: 'var(--font-mono)', marginLeft: '8px' }}>
-                  ID: {tid}
+            <div>
+              <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: '13px' }}>{terminal.name}</span>
+              {terminal.abbr && (
+                <span style={{ color: 'var(--accent)', fontSize: '11px', fontFamily: 'var(--font-mono)', marginLeft: '8px' }}>
+                  {terminal.abbr}
                 </span>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{drivers.length} driver(s)</span>
-                <button onClick={() => deleteTerminal(parseInt(tid))} style={btnDangerStyle}>Remove Terminal</button>
-              </div>
+              )}
+              <span style={{ color: 'var(--text-dim)', fontSize: '11px', fontFamily: 'var(--font-mono)', marginLeft: '8px' }}>
+                ID: {tid}
+              </span>
             </div>
-            <div style={{ padding: '10px 14px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {drivers.map(d => (
-                <div key={d.driver_id} style={{
-                  padding: '4px 10px',
-                  background: 'var(--surface-overlay)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '4px',
-                  display: 'flex', alignItems: 'center', gap: '6px',
-                  fontSize: '12px', color: 'var(--text)',
-                }}>
-                  {d.last_name}, {d.first_name}
-                  <button
-                    onClick={() => removeAccess(d.driver_id, parseInt(tid))}
-                    style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
-                  >×</button>
-                </div>
-              ))}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{terminal.drivers.length} driver(s)</span>
+              <button onClick={() => deleteTerminal(parseInt(tid))} style={btnDangerStyle}>Remove Terminal</button>
             </div>
           </div>
-        )
-      })}
+          <div style={{ padding: '10px 14px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {terminal.drivers
+              .sort((a: any, b: any) => (a.last_name || '').localeCompare(b.last_name || ''))
+              .map((d: any) => (
+              <div key={d.driver_id} style={{
+                padding: '4px 10px',
+                background: 'var(--surface-overlay)',
+                border: '1px solid var(--border)',
+                borderRadius: '4px',
+                display: 'flex', alignItems: 'center', gap: '6px',
+                fontSize: '12px', color: 'var(--text)',
+              }}>
+                {d.last_name && d.first_name ? `${d.last_name}, ${d.first_name}` : `Driver #${d.driver_id}`}
+                <button
+                  onClick={() => removeAccess(d.driver_id, parseInt(tid))}
+                  style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
+                >×</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

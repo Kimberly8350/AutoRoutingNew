@@ -330,7 +330,41 @@ def update_attendance(driver_id: int, body: dict, user=Depends(verify_token)):
 @app.get("/api/terminal-access")
 def get_terminal_access(user=Depends(verify_token)):
     client = get_supabase()
-    return client.table("driver_terminal_cards").select("*").execute().data
+
+    cards = client.table("driver_terminal_cards").select("driver_id,terminal_id").execute().data
+
+    # Build terminal_id → terminal info map
+    term_rows = client.table("terminal_locations").select("terminal_id,terminal_name,terminal_abbreviation").execute().data
+    term_map = {int(t["terminal_id"]): t for t in term_rows if t.get("terminal_id")}
+
+    # Build driver_id → name map from the most recent driver schedules available
+    from datetime import date, timedelta
+    driver_map: dict[int, dict] = {}
+    for delta in range(0, 30):
+        d = (date.today() - timedelta(days=delta)).isoformat()
+        rows = client.table("driver_schedules").select("driver_id,first_name,last_name").eq("shift_date", d).execute().data
+        for r in rows:
+            did = r.get("driver_id")
+            if did and int(did) not in driver_map:
+                driver_map[int(did)] = r
+        if len(driver_map) >= 30:  # enough drivers found
+            break
+
+    enriched = []
+    for card in cards:
+        tid = int(card.get("terminal_id") or 0)
+        did = int(card.get("driver_id") or 0)
+        term = term_map.get(tid, {})
+        driver = driver_map.get(did, {})
+        enriched.append({
+            "driver_id": did,
+            "terminal_id": tid,
+            "terminal_name": term.get("terminal_name") or f"Terminal {tid}",
+            "terminal_abbreviation": term.get("terminal_abbreviation") or "",
+            "first_name": driver.get("first_name") or "",
+            "last_name": driver.get("last_name") or "",
+        })
+    return enriched
 
 
 @app.post("/api/terminal-access")
