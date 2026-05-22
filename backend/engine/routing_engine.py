@@ -24,13 +24,14 @@ log = logging.getLogger(__name__)
 # Load status constants
 STATUS_UNSCHEDULED = 1
 STATUS_PLANNED = 2
+STATUS_ASSIGNED = 10
 STATUS_EN_ROUTE_RACK = 12
 STATUS_AT_RACK = 20
 STATUS_EN_ROUTE_SITE = 22
 STATUS_AT_SITE = 24
 STATUS_DELIVERED = 26
 
-LOCKED_STATUSES = {STATUS_EN_ROUTE_RACK, STATUS_AT_RACK, STATUS_EN_ROUTE_SITE, STATUS_DELIVERED}
+LOCKED_STATUSES = {STATUS_ASSIGNED, STATUS_EN_ROUTE_RACK, STATUS_AT_RACK, STATUS_EN_ROUTE_SITE, STATUS_AT_SITE, STATUS_DELIVERED}
 SAME_TERMINAL_SWAP_STATUS = {STATUS_EN_ROUTE_RACK}
 
 # Delivery window tolerance
@@ -303,29 +304,57 @@ class RoutingEngine:
 
     # ---- seed locked loads in reroute mode ----
 
+    def _locked_load_sort_key(self, load: Load):
+        """
+        Sort key for pre-assigned loads on a driver's column:
+        - Status 26 (delivered): sort by completed_delivery_time ascending
+        - Status 10/22/24: sort by delivery_eta ascending
+        - Others: push to end
+        """
+        if load.load_status == STATUS_DELIVERED:
+            return (0, load.completed_delivery_time or datetime.max)
+        if load.load_status in (STATUS_EN_ROUTE_SITE, STATUS_AT_SITE, STATUS_ASSIGNED):
+            return (1, load.delivery_eta or datetime.max)
+        return (2, datetime.max)
+
     def _seed_locked_loads(self, load_map: dict[int, Load]):
-        """In reroute mode, preserve loads with locked statuses on their assigned driver."""
+        """Preserve loads with locked statuses on their assigned driver.
+
+        Always runs (not just in reroute mode) so that pre-assigned and
+        in-progress loads always appear on the correct driver regardless of
+        whether this is a fresh dispatch or a reroute.
+        """
+        # Group locked loads by driver
+        driver_locked: dict[int, list[Load]] = {}
         for load in self.loads:
             if load.load_status not in LOCKED_STATUSES:
                 continue
             if not load.assigned_driver_id:
                 continue
-            driver = next((d for d in self.drivers if d.driver_id == load.assigned_driver_id), None)
+            driver_locked.setdefault(load.assigned_driver_id, []).append(load)
+
+        for driver_id, locked_loads in driver_locked.items():
+            driver = next((d for d in self.drivers if d.driver_id == driver_id), None)
             if not driver:
                 continue
+
+            # Sort locked loads by status-specific time field
+            locked_loads.sort(key=self._locked_load_sort_key)
 
             if driver.driver_id not in self.routes:
                 self.routes[driver.driver_id] = DriverRoute(driver=driver)
 
             route = self.routes[driver.driver_id]
-            if len(route.stops) >= 4:
-                continue
 
-            current_stops = [(self._find_load_by_ce(s.ce_id), s.sequence) for s in route.stops]
-            current_stops.append((load, len(current_stops)))
-            simulated = self._simulate_route(driver, current_stops)
-            if simulated:
-                self.routes[driver.driver_id] = simulated
+            for load in locked_loads:
+                if len(route.stops) >= 4:
+                    break
+                current_stops = [(self._find_load_by_ce(s.ce_id), s.sequence) for s in route.stops]
+                current_stops.append((load, len(current_stops)))
+                simulated = self._simulate_route(driver, current_stops)
+                if simulated:
+                    self.routes[driver.driver_id] = simulated
+                    route = self.routes[driver.driver_id]
 
     # ---- main run ----
 
@@ -337,6 +366,21 @@ class RoutingEngine:
         for load in self.loads:
             load.site = self.sites.get(load.site_id)
             load.terminal = self.terminals.get(load.terminal_id)
+
+        # Build driver name → driver_id lookup so loads with no numeric
+        # assigned_driver_id can be resolved from first_name/last_name fields.
+        name_to_driver: dict[tuple[str, str], int] = {
+            (d.first_name.strip().lower(), d.last_name.strip().lower()): d.driver_id
+            for d in self.drivers
+        }
+
+        # Resolve assigned_driver_id for every load that has a driver name but no ID.
+        for load in self.loads:
+            if not load.assigned_driver_id:
+                fn = (load.assigned_driver_first or "").strip().lower()
+                ln = (load.assigned_driver_last or "").strip().lower()
+                if fn or ln:
+                    load.assigned_driver_id = name_to_driver.get((fn, ln))
 
         # Filter deliverable loads (today ± 1 day).
         # Only route loads that are unscheduled (status=1) or have no status set —
@@ -365,9 +409,10 @@ class RoutingEngine:
 
         sorted_loads = self._sort_loads(valid_loads)
 
-        if self.reroute:
-            load_map = {l.ce_id: l for l in sorted_loads}
-            self._seed_locked_loads(load_map)
+        # Always seed locked/pre-assigned loads onto their drivers first so that
+        # capacity (4-stop limit) is accounted for before routing unscheduled loads.
+        load_map = {l.ce_id: l for l in self.loads}
+        self._seed_locked_loads(load_map)
 
         assigned_ce_ids = set()
         for route in self.routes.values():

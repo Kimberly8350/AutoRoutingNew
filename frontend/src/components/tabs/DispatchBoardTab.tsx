@@ -87,8 +87,9 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
       }
     }
 
-    // Merge pre-assigned loads (status > 1, already delivered/in-progress)
+    // Merge pre-assigned loads (status > 1, already delivered/in-progress/assigned)
     // These appear at the top of the driver's column before routed loads.
+    // Backend returns them in status-priority order; we push in order to preserve it.
     const preAssignedCeIds = new Set<number>()
     for (const row of (pre_assigned || [])) {
       preAssignedCeIds.add(row.ce_id)
@@ -101,7 +102,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
         }
       }
       const load = loadMap[row.ce_id]
-      driverMap[row.driver_id].loads.unshift({
+      driverMap[row.driver_id].loads.push({
         ...(load || {}),
         ce_id: row.ce_id,
         site_name: row.site_name || load?.site_name || '',
@@ -109,18 +110,43 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
         terminal_name: row.terminal_name || load?.terminal_name || '',
         load_status: row.load_status ?? load?.load_status,
         eta: row.eta,
+        completed_delivery_time: row.completed_delivery_time ?? load?.completed_delivery_time,
         sequence: undefined,
         pre_assigned: true,
       })
     }
 
-    // Sort loads within each driver: pre-assigned (in-progress/delivered) first,
-    // then routed loads in sequence order.
+    // Sort loads within each driver column:
+    //   1. Pre-assigned group first (delivered, then in-progress 22/24, then assigned-not-started 10)
+    //      - Status 26: by completed_delivery_time asc
+    //      - Status 22/24: by delivery_eta asc
+    //      - Status 10: by delivery_eta asc
+    //   2. Routed loads in sequence order
+    function paStatusGroup(load: any): number {
+      const s = Number(load.load_status ?? 0)
+      if (s === 26) return 0   // delivered
+      if (s === 22 || s === 24) return 1  // en route / at site
+      if (s === 10) return 2   // assigned, not started
+      return 3
+    }
+    function paSortTime(load: any): string {
+      const s = Number(load.load_status ?? 0)
+      if (s === 26) return load.completed_delivery_time || '9999'
+      return load.eta || load.delivery_eta || '9999'
+    }
+
     for (const col of Object.values(driverMap)) {
       col.loads.sort((a, b) => {
         const aPA = (a as any).pre_assigned ? 0 : 1
         const bPA = (b as any).pre_assigned ? 0 : 1
         if (aPA !== bPA) return aPA - bPA
+        // Both pre-assigned: sort by status group then time
+        if (aPA === 0 && bPA === 0) {
+          const gDiff = paStatusGroup(a) - paStatusGroup(b)
+          if (gDiff !== 0) return gDiff
+          return paSortTime(a).localeCompare(paSortTime(b))
+        }
+        // Both routed: sort by sequence
         return (a.sequence ?? 0) - (b.sequence ?? 0)
       })
     }

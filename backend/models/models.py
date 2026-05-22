@@ -92,6 +92,7 @@ class Load:
     window_start: Optional[datetime] = None
     window_end: Optional[datetime] = None
     delivery_eta: Optional[datetime] = None
+    completed_delivery_time: Optional[datetime] = None
     assigned_driver_id: Optional[int] = None
     assigned_driver_first: Optional[str] = None
     assigned_driver_last: Optional[str] = None

@@ -332,6 +332,7 @@ def load_loads_for_date(
             window_start=_parse_dt(r.get("window_start")),
             window_end=_parse_dt(r.get("window_end")),
             delivery_eta=_parse_dt(r.get("delivery_eta")),
+            completed_delivery_time=_parse_dt(r.get("completed_delivery_time")),
             assigned_driver_id=None,  # resolved from first_name/last_name if needed
             assigned_driver_first=r.get("first_name"),
             assigned_driver_last=r.get("last_name"),

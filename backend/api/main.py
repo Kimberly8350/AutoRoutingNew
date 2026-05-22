@@ -450,7 +450,25 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
     dispatched_ce_ids = {r["ce_id"] for r in results}
     seen: set[int] = set()
     pre_assigned: list[dict] = []
-    for load in sorted(pre_assigned_loads, key=lambda r: r.get("delivery_eta") or ""):
+
+    def _pa_sort_key(r: dict):
+        """
+        Sort order for pre-assigned loads within a driver's column:
+          1. Delivered (26): sort by completed_delivery_time asc
+          2. In-progress (22, 24): sort by delivery_eta asc
+          3. Assigned-not-started (10): sort by delivery_eta asc
+          4. Everything else: push to end
+        """
+        status = int(r.get("load_status") or 0)
+        if status == 26:
+            return (0, r.get("completed_delivery_time") or "9999")
+        if status in (22, 24):
+            return (1, r.get("delivery_eta") or "9999")
+        if status == 10:
+            return (2, r.get("delivery_eta") or "9999")
+        return (3, r.get("delivery_eta") or "9999")
+
+    for load in sorted(pre_assigned_loads, key=_pa_sort_key):
         ce_id = load.get("ce_id")
         if ce_id is None or ce_id in dispatched_ce_ids or ce_id in seen:
             continue
@@ -460,6 +478,12 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
         driver = driver_name_map.get(f"{fname} {lname}".lower())
         if not driver:
             continue
+        status = int(load.get("load_status") or 0)
+        # Use status-appropriate time as the display ETA
+        if status == 26:
+            display_eta = load.get("completed_delivery_time") or load.get("delivery_eta")
+        else:
+            display_eta = load.get("delivery_eta")
         pre_assigned.append({
             "dispatch_date": dispatch_date,
             "driver_id": driver["driver_id"],
@@ -470,8 +494,9 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
             "terminal_name": load.get("terminal_name") or "",
             "site_name": load.get("site_name") or "",
             "site_city": load.get("city") or "",
-            "eta": load.get("delivery_eta"),
-            "load_status": load.get("load_status"),
+            "eta": display_eta,
+            "load_status": status,
+            "completed_delivery_time": load.get("completed_delivery_time"),
             "pre_assigned": True,
         })
 
