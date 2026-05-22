@@ -30,20 +30,13 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app = FastAPI(title="AutoRouting API", version="1.0.0")
 
-# Allowed origins: explicit list + regex for all Vercel preview deployments.
-# Starlette 0.47+ supports allow_origin_regex alongside allow_origins.
-_allowed_origins = list({
-    FRONTEND_URL,
-    "http://localhost:3000",
-    "https://localhost:3000",
-    *[o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()],
-})
-
+# The frontend authenticates via Bearer token in the Authorization header,
+# not via cookies, so allow_credentials is not needed. This lets us use
+# allow_origins=["*"] which avoids all origin-matching complexity.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
-    allow_origin_regex=r"https://[a-zA-Z0-9\-]+-rack-point\.vercel\.app|https://[a-zA-Z0-9\-]+\.vercel\.app",
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
