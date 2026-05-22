@@ -8,8 +8,9 @@ from datetime import date, datetime
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -42,6 +43,22 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Catch-all for unhandled exceptions. Without this, Starlette's ServerErrorMiddleware
+    sends the 500 response using the raw send() callback, bypassing the CORS middleware
+    wrapper — so the browser sees a CORS error instead of the real 500.
+    Returning a JSONResponse here goes through the normal response path and gets
+    CORS headers applied correctly.
+    """
+    log.exception(f"Unhandled exception on {request.method} {request.url}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+
 def get_supabase() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
@@ -51,8 +68,10 @@ async def verify_token(authorization: str = Header(None)) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid token")
     token = authorization.split(" ")[1]
-    client = create_client(SUPABASE_URL, os.getenv("SUPABASE_ANON_KEY"))
+    # Use the service key client for JWT verification — avoids needing SUPABASE_ANON_KEY
+    # on the server and keeps all auth in one client instance.
     try:
+        client = get_supabase()
         user = client.auth.get_user(token)
         return user.user
     except Exception:
