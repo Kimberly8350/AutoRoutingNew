@@ -418,7 +418,7 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
     while True:
         _pa_batch = (
             client.table("load_details")
-            .select("ce_id,first_name,last_name,load_status,site_name,site_address,city,terminal_name,delivery_eta,window_start,window_end,product_name,gross_gallons,customer_name,order_number")
+            .select("ce_id,first_name,last_name,load_status,site_name,site_address,city,terminal_name,delivery_eta,window_start,window_end,product_name,gross_gallons,customer_name,order_number,completed_delivery_time")
             .eq("delivery_date", dispatch_date)
             .gt("load_status", 1)
             .not_.is_("first_name", "null")

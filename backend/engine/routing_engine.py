@@ -346,7 +346,7 @@ class RoutingEngine:
         eligible_loads = [
             l for l in self.loads
             if l.delivery_date and abs((date.fromisoformat(l.delivery_date) - today).days) <= 1
-            and (l.load_status is None or l.load_status <= 1)
+            and (l.load_status == 1)  # only route unscheduled; 0=deleted, >1=in progress
         ]
 
         # Validate each load

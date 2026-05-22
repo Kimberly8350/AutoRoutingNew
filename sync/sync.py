@@ -41,12 +41,12 @@ EXCEL_FILES = {
     "site_details": "site_details.xlsx",
     "driver_schedules": "Auto_Routing_Driver_Schedule.xlsx",   # live ODBC file (no 's' in Driver)
     "driver_terminal_cards": "Driver_terminal_cards.xlsx",
-    "load_details": "Loads Feed for Kim.xlsx",
+    "load_details": "Loads Feed for Kim 2.0.xlsx",
 }
 
 # Some Excel files have multiple sheets; specify which sheet to read for each table.
 SHEET_NAMES = {
-    "load_details": "Main",
+    "load_details": "dlb_order_drop_details",
 }
 
 
@@ -190,15 +190,21 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
     df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
 
-    # Normalize column names from the new "Loads Feed for Kim.xlsx" Main sheet
-    # to match the DB schema (handles both old load_details.xlsx and new feed).
+    # Normalize column names from "Loads Feed for Kim 2.0.xlsx" to DB schema.
     df = df.rename(columns={
-        "customer":            "customer_name",   # was Customer
-        "gallons_ordered":     "gross_gallons",   # was Gallons_Ordered
-        "start_window":        "window_start",    # was Start_Window
-        "end_window":          "window_end",      # was End_Window
-        "arrived_at_rack_time": "arrived_at_rack", # was Arrived_at_Rack_Time
+        "gallons_ordered":     "gross_gallons",    # Gallons_Ordered → gross_gallons
+        "address":             "site_address",     # Address → site_address
+        "arrived_at_rack_time": "arrived_at_rack", # Arrived_At_Rack_Time → arrived_at_rack
     })
+
+    # Status 0 = deleted loads — exclude entirely, do not upsert to DB.
+    if "load_status" in df.columns:
+        before = len(df)
+        df = df[pd.to_numeric(df["load_status"], errors="coerce").fillna(-1) != 0].copy()
+        removed = before - len(df)
+        if removed:
+            import logging as _log
+            _log.getLogger(__name__).info(f"load_details: dropped {removed} deleted (status=0) rows")
 
     df["ce_id"] = pd.to_numeric(df["ce_id"], errors="coerce")
     df = df.dropna(subset=["ce_id"])
@@ -213,7 +219,7 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
             )
 
     for dt_col in ["window_start", "window_end", "delivery_eta", "arrived_at_rack",
-                   "left_rack", "arrived_at_site"]:
+                   "left_rack", "arrived_at_site", "completed_delivery_time"]:
         if dt_col in df.columns:
             df[dt_col] = _parse_excel_datetime(df[dt_col])
 
@@ -239,6 +245,7 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
         "load_status_description", "city", "state", "site_name", "site_address",
         "first_name", "last_name", "window_start", "window_end", "delivery_eta",
         "load_status", "arrived_at_rack", "left_rack", "arrived_at_site",
+        "completed_delivery_time",
     }
     df = df[[c for c in df.columns if c in DB_COLS]]
 
@@ -305,50 +312,11 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
         df = pd.read_excel(read_path, sheet_name=sheet)
         log.info(f"Read {len(df)} rows from {filename}" + (f" (sheet: {sheet!r})" if sheet != 0 else ""))
 
-        # For load_details: merge terminal names and driver names from the
-        # "Driver & Terminal" sheet (BillOfLadingId = CE_ID join on product).
-        # Normalize both sheets to lowercase column names before merging so the
-        # join works regardless of how the Excel file delivers the header casing.
+        # Loads Feed for Kim 2.0: driver names and terminal names are already
+        # in the main sheet — no secondary sheet merge needed.
+        # Just normalize column casing.
         if table == "load_details":
-            try:
-                dt = pd.read_excel(read_path, sheet_name="Driver & Terminal")
-                # Lowercase both DataFrames before any name-dependent operations
-                df.columns  = [c.strip().lower() for c in df.columns]
-                dt.columns  = [c.strip().lower() for c in dt.columns]
-                # Map Driver & Terminal sheet columns → working names
-                dt = dt.rename(columns={
-                    "billoflading_id": "ce_id",   # try common casing variants below
-                    "billoflading id": "ce_id",
-                    "bill_of_lading_id": "ce_id",
-                    "billofladingid": "ce_id",
-                    "terminalname":  "_dt_terminal_name",
-                    "terminal_name": "_dt_terminal_name",
-                    "productname":   "product_name",
-                    "product_name":  "product_name",
-                    "fname":         "_dt_first_name",
-                    "first_name":    "_dt_first_name",
-                    "lname":         "_dt_last_name",
-                    "last_name":     "_dt_last_name",
-                })
-                # Also handle main sheet's ce_id / product_name in lowercase
-                keep_cols = [c for c in ["ce_id", "product_name", "_dt_terminal_name",
-                                          "_dt_first_name", "_dt_last_name"] if c in dt.columns]
-                dt = dt[keep_cols].drop_duplicates(subset=["ce_id", "product_name"], keep="first") \
-                    if "ce_id" in dt.columns and "product_name" in dt.columns \
-                    else dt[keep_cols]
-                df = df.merge(dt, on=["ce_id", "product_name"], how="left")
-                # Fill blanks in Main sheet with values from Driver & Terminal sheet
-                for src, dst in [("_dt_terminal_name", "terminal_name"),
-                                  ("_dt_first_name",    "first_name"),
-                                  ("_dt_last_name",     "last_name")]:
-                    if src in df.columns and dst in df.columns:
-                        df[dst] = df[dst].fillna(df[src])
-                        df = df.drop(columns=[src])
-                log.info(f"load_details: merged Driver & Terminal sheet ({len(dt)} rows)")
-            except Exception as e:
-                log.warning(f"load_details: could not merge Driver & Terminal sheet: {e}")
-                # Ensure columns are still lowercased even if merge failed
-                df.columns = [c.strip().lower() for c in df.columns]
+            df.columns = [c.strip().lower() for c in df.columns]
     except Exception as e:
         log.error(f"Failed to read {filename}: {e}")
         return {"table": table, "status": "error", "error": str(e)}
