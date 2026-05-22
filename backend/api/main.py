@@ -31,9 +31,29 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app = FastAPI(title="AutoRouting API", version="1.0.0")
 
-# The frontend authenticates via Bearer token in the Authorization header,
-# not via cookies, so allow_credentials is not needed. This lets us use
-# allow_origins=["*"] which avoids all origin-matching complexity.
+# IMPORTANT: middleware ordering matters.
+# Starlette builds the stack as: ServerErrorMiddleware → [user middlewares reversed] → ExceptionMiddleware → Routes
+# add_middleware() prepends, so the LAST add_middleware call ends up OUTERMOST of user middlewares.
+#
+# We need CORSMiddleware to be OUTERMOST so it wraps the error-catching middleware.
+# Therefore: add error catcher first (via @app.middleware), then add CORSMiddleware.
+#
+# Resulting stack: Server → CORS → catch_exceptions → ExceptionMiddleware → Routes
+# Errors from routes are caught inside CORS, so responses get CORS headers. ✓
+
+@app.middleware("http")
+async def catch_unhandled_exceptions(request: Request, call_next):
+    """Catch unhandled exceptions inside CORSMiddleware so 500s include CORS headers."""
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        log.exception(f"Unhandled exception on {request.method} {request.url}: {exc}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
+
+# Add CORS last so it is outermost (wraps everything above)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,22 +61,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    """
-    Catch-all for unhandled exceptions. Without this, Starlette's ServerErrorMiddleware
-    sends the 500 response using the raw send() callback, bypassing the CORS middleware
-    wrapper — so the browser sees a CORS error instead of the real 500.
-    Returning a JSONResponse here goes through the normal response path and gets
-    CORS headers applied correctly.
-    """
-    log.exception(f"Unhandled exception on {request.method} {request.url}: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )
 
 
 def get_supabase() -> Client:
