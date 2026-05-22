@@ -30,9 +30,17 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app = FastAPI(title="AutoRouting API", version="1.0.0")
 
+# Build allowed origins: configured frontend URL + localhost + all Vercel preview URLs.
+# Vercel generates unique preview URLs per deployment so we allow the whole *.vercel.app
+# domain via allow_origin_regex rather than a static list.
+_explicit_origins = list({FRONTEND_URL, "http://localhost:3000"}.union(
+    {o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()}
+))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000"],
+    allow_origins=_explicit_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
