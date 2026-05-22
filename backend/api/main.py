@@ -431,10 +431,11 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
             break
         _pa_offset += 1000
 
-    # Load driver_schedules for the date to resolve name → driver_id / board_location
+    # Load ALL driver_schedules for the date (all attendance states)
+    # so the board can render every driver column and flag exceptions.
     driver_rows = (
         client.table("driver_schedules")
-        .select("driver_id,first_name,last_name,board_location")
+        .select("driver_id,first_name,last_name,board_location,attendance_expected,driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours,attendance_confirmed")
         .eq("shift_date", dispatch_date)
         .execute()
         .data
@@ -505,6 +506,7 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
         "pre_assigned": pre_assigned,
         "unassigned": unassigned,
         "loads": loads,
+        "driver_schedules": driver_rows,
     }
 
 

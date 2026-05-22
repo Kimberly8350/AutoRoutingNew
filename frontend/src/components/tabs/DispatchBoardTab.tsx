@@ -18,6 +18,10 @@ interface DriverColumn {
   driver_name: string
   board_location: string
   loads: LoadCardData[]
+  attendance_expected?: number | null
+  driver_schedule?: number | null
+  attendance_confirmed?: number | boolean | null
+  start_time?: string | null
 }
 
 interface Props { selectedDate: string }
@@ -56,7 +60,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
   useEffect(() => { fetchBoard() }, [fetchBoard])
 
   function buildBoards(data: any) {
-    const { dispatch_results, pre_assigned, unassigned: ua, loads } = data
+    const { dispatch_results, pre_assigned, unassigned: ua, loads, driver_schedules } = data
 
     // Build load map for quick lookup
     const loadMap: Record<number, any> = {}
@@ -64,16 +68,41 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
       if (!loadMap[l.ce_id]) loadMap[l.ce_id] = l
     }
 
-    // Group dispatch results by driver
+    // --- Step 1: Seed ALL scheduled drivers as columns (attendance_expected=1 OR has loads) ---
+    // driver_schedules is the source of truth for who appears on the board.
     const driverMap: Record<number, DriverColumn> = {}
+
+    for (const sched of (driver_schedules || [])) {
+      const did = sched.driver_id
+      if (!did) continue
+      const driverName = `${sched.first_name || ''} ${sched.last_name || ''}`.trim()
+      driverMap[did] = {
+        driver_id: did,
+        driver_name: driverName,
+        board_location: sched.board_location || 'TX-AM',
+        loads: [],
+        // Extra schedule metadata for exception display
+        attendance_expected: sched.attendance_expected,
+        driver_schedule: sched.driver_schedule,
+        attendance_confirmed: sched.attendance_confirmed,
+        start_time: sched.driver_start_time,
+      } as any
+    }
+
+    // --- Step 2: Apply dispatch results (routed loads) ---
     for (const row of (dispatch_results || [])) {
+      // Create column if driver wasn't in schedule (working extra / unscheduled)
       if (!driverMap[row.driver_id]) {
         driverMap[row.driver_id] = {
           driver_id: row.driver_id,
           driver_name: row.driver_name,
-          board_location: row.board_location,
+          board_location: row.board_location || 'TX-AM',
           loads: [],
-        }
+          attendance_expected: null,  // not in schedule = exception
+          driver_schedule: null,
+          attendance_confirmed: null,
+          start_time: null,
+        } as any
       }
       const load = loadMap[row.ce_id]
       if (load) {
@@ -87,21 +116,23 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
       }
     }
 
-    // Merge pre-assigned loads (status > 1, already delivered/in-progress/assigned)
-    // These appear at the top of the driver's column before routed loads.
-    // Backend returns them in status-priority order; we push in order to preserve it.
-    const preAssignedCeIds = new Set<number>()
+    // --- Step 3: Merge pre-assigned loads (status > 1) ---
     for (const row of (pre_assigned || [])) {
-      preAssignedCeIds.add(row.ce_id)
       if (!driverMap[row.driver_id]) {
         driverMap[row.driver_id] = {
           driver_id: row.driver_id,
           driver_name: row.driver_name,
-          board_location: row.board_location,
+          board_location: row.board_location || 'TX-AM',
           loads: [],
-        }
+          attendance_expected: null,
+          driver_schedule: null,
+          attendance_confirmed: null,
+          start_time: null,
+        } as any
       }
       const load = loadMap[row.ce_id]
+      // Skip duplicates already added via dispatch_results
+      if (driverMap[row.driver_id].loads.some((l: any) => l.ce_id === row.ce_id)) continue
       driverMap[row.driver_id].loads.push({
         ...(load || {}),
         ce_id: row.ce_id,
@@ -116,17 +147,12 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
       })
     }
 
-    // Sort loads within each driver column:
-    //   1. Pre-assigned group first (delivered, then in-progress 22/24, then assigned-not-started 10)
-    //      - Status 26: by completed_delivery_time asc
-    //      - Status 22/24: by delivery_eta asc
-    //      - Status 10: by delivery_eta asc
-    //   2. Routed loads in sequence order
+    // --- Step 4: Sort loads within each driver column ---
     function paStatusGroup(load: any): number {
       const s = Number(load.load_status ?? 0)
-      if (s === 26) return 0   // delivered
-      if (s === 22 || s === 24) return 1  // en route / at site
-      if (s === 10) return 2   // assigned, not started
+      if (s === 26) return 0
+      if (s === 22 || s === 24) return 1
+      if (s === 10) return 2
       return 3
     }
     function paSortTime(load: any): string {
@@ -136,29 +162,29 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
     }
 
     for (const col of Object.values(driverMap)) {
-      col.loads.sort((a, b) => {
-        const aPA = (a as any).pre_assigned ? 0 : 1
-        const bPA = (b as any).pre_assigned ? 0 : 1
+      col.loads.sort((a: any, b: any) => {
+        const aPA = a.pre_assigned ? 0 : 1
+        const bPA = b.pre_assigned ? 0 : 1
         if (aPA !== bPA) return aPA - bPA
-        // Both pre-assigned: sort by status group then time
         if (aPA === 0 && bPA === 0) {
           const gDiff = paStatusGroup(a) - paStatusGroup(b)
           if (gDiff !== 0) return gDiff
           return paSortTime(a).localeCompare(paSortTime(b))
         }
-        // Both routed: sort by sequence
         return (a.sequence ?? 0) - (b.sequence ?? 0)
       })
     }
 
-    // Group drivers by board location
+    // --- Step 5: Group by board location ---
     const boardGroups: Record<string, DriverColumn[]> = {}
     for (const loc of BOARD_LOCATIONS) boardGroups[loc] = []
+
     for (const col of Object.values(driverMap)) {
-      const loc = col.board_location || 'TX-AM'
+      const loc = (col as any).board_location || 'TX-AM'
       if (!boardGroups[loc]) boardGroups[loc] = []
       boardGroups[loc].push(col)
     }
+
     // Sort each board alphabetically by last name
     for (const loc of BOARD_LOCATIONS) {
       boardGroups[loc].sort((a, b) => {
@@ -171,12 +197,9 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
     setBoards(boardGroups)
     setUnassigned(ua || [])
 
-    // Only count loads whose delivery_date matches the selected date.
-    // The routing engine processes ±1 day, so dispatch_results and
-    // unassigned_loads can contain loads from adjacent dates.
     const todayCeIds = new Set(Object.keys(loadMap).map(Number))
     const totalAssigned = Object.values(driverMap).reduce(
-      (s, d) => s + d.loads.filter(l => todayCeIds.has(l.ce_id)).length, 0
+      (s, d) => s + d.loads.filter((l: any) => todayCeIds.has(l.ce_id)).length, 0
     )
     const todayUnassigned = (ua || []).filter((u: any) => todayCeIds.has(u.ce_id))
     setTotals({
@@ -537,23 +560,64 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
                     overflow: 'hidden',
                   }}>
                     {/* Driver header */}
-                    <div style={{
-                      padding: '10px 12px',
-                      borderBottom: '1px solid var(--border)',
-                      background: 'var(--surface-overlay)',
-                    }}>
-                      <div style={{
-                        fontWeight: 600,
-                        fontSize: '13px',
-                        color: 'var(--text)',
-                        marginBottom: '2px',
-                      }}>
-                        {col.driver_name}
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                        {col.loads.length} load{col.loads.length !== 1 ? 's' : ''}
-                      </div>
-                    </div>
+                    {(() => {
+                      const sched = col as any
+                      const notWorking = sched.attendance_expected === 0
+                      const unscheduled = sched.attendance_expected === null
+                      const confirmed = sched.attendance_confirmed === 1 || sched.attendance_confirmed === true
+                      const isException = notWorking || unscheduled
+                      return (
+                        <div style={{
+                          padding: '10px 12px',
+                          borderBottom: '1px solid var(--border)',
+                          background: notWorking
+                            ? 'rgba(239,68,68,0.08)'
+                            : unscheduled
+                            ? 'rgba(245,158,11,0.08)'
+                            : 'var(--surface-overlay)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', marginBottom: '3px' }}>
+                            <span style={{
+                              fontWeight: 600,
+                              fontSize: '13px',
+                              color: notWorking ? '#f87171' : 'var(--text)',
+                              textDecoration: notWorking ? 'line-through' : 'none',
+                            }}>
+                              {col.driver_name}
+                            </span>
+                            {confirmed && (
+                              <span style={{
+                                fontSize: '10px', fontWeight: 700,
+                                padding: '1px 5px', borderRadius: '3px',
+                                background: 'rgba(22,163,74,0.15)', color: '#16a34a',
+                              }}>✓ CONF</span>
+                            )}
+                            {notWorking && (
+                              <span style={{
+                                fontSize: '10px', fontWeight: 700,
+                                padding: '1px 5px', borderRadius: '3px',
+                                background: 'rgba(239,68,68,0.15)', color: '#f87171',
+                              }}>OUT</span>
+                            )}
+                            {unscheduled && col.loads.length > 0 && (
+                              <span style={{
+                                fontSize: '10px', fontWeight: 700,
+                                padding: '1px 5px', borderRadius: '3px',
+                                background: 'rgba(245,158,11,0.15)', color: '#f59e0b',
+                              }}>EXTRA</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                            {col.loads.length} load{col.loads.length !== 1 ? 's' : ''}
+                            {sched.start_time && (
+                              <span style={{ marginLeft: '6px', color: 'var(--text-dim)' }}>
+                                · {sched.start_time}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })()}
 
                     {/* Load list */}
                     <div style={{
