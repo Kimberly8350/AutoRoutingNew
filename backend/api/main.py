@@ -68,10 +68,9 @@ async def verify_token(authorization: str = Header(None)) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid token")
     token = authorization.split(" ")[1]
-    # Use the service key client for JWT verification — avoids needing SUPABASE_ANON_KEY
-    # on the server and keeps all auth in one client instance.
     try:
-        client = get_supabase()
+        anon_key = os.getenv("SUPABASE_ANON_KEY") or SUPABASE_SERVICE_KEY
+        client = create_client(SUPABASE_URL, anon_key)
         user = client.auth.get_user(token)
         return user.user
     except Exception:
