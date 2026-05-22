@@ -67,12 +67,12 @@ class DispatchRequest(BaseModel):
 
 class AddTerminalAccessRequest(BaseModel):
     driver_id: int
-    terminal_id: int
+    terminal_id: str  # ODBC string, e.g. "T-01-TX-0001"
 
 
 class RemoveTerminalAccessRequest(BaseModel):
     driver_id: int
-    terminal_id: int
+    terminal_id: str  # ODBC string, e.g. "T-01-TX-0001"
 
 
 class AddRestrictionRequest(BaseModel):
@@ -333,9 +333,12 @@ def get_terminal_access(user=Depends(verify_token)):
 
     cards = client.table("driver_terminal_cards").select("driver_id,terminal_id").execute().data
 
-    # Build terminal_id → terminal info map
-    term_rows = client.table("terminal_locations").select("terminal_id,terminal_name,terminal_abbreviation").execute().data
-    term_map = {int(t["terminal_id"]): t for t in term_rows if t.get("terminal_id")}
+    # Build terminal_id (ODBC string) → terminal info map
+    term_rows = client.table("terminal_locations").select("terminal_id,terminal_name,terminal_abbreviation,terminal_abreviation").execute().data
+    term_map = {
+        str(t["terminal_id"]).strip(): t
+        for t in term_rows if t.get("terminal_id")
+    }
 
     # Build driver_id → name map from the most recent driver schedules available
     from datetime import date, timedelta
@@ -352,15 +355,17 @@ def get_terminal_access(user=Depends(verify_token)):
 
     enriched = []
     for card in cards:
-        tid = int(card.get("terminal_id") or 0)
+        tid = str(card.get("terminal_id") or "").strip()
         did = int(card.get("driver_id") or 0)
         term = term_map.get(tid, {})
         driver = driver_map.get(did, {})
+        # Use terminal_abbreviation if set, fall back to terminal_abreviation (legacy typo column)
+        abbr = term.get("terminal_abbreviation") or term.get("terminal_abreviation") or ""
         enriched.append({
             "driver_id": did,
             "terminal_id": tid,
             "terminal_name": term.get("terminal_name") or f"Terminal {tid}",
-            "terminal_abbreviation": term.get("terminal_abbreviation") or "",
+            "terminal_abbreviation": abbr,
             "first_name": driver.get("first_name") or "",
             "last_name": driver.get("last_name") or "",
         })
