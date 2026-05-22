@@ -452,7 +452,15 @@ def remove_restriction(restriction_id: int, user=Depends(verify_token)):
 # ---- Dispatch Board ----
 @app.get("/api/dispatch")
 def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
-    client = get_supabase()
+    try:
+     return _get_dispatch_board_inner(dispatch_date, get_supabase())
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception(f"get_dispatch_board error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _get_dispatch_board_inner(dispatch_date: str, client):
     results = client.table("dispatch_results").select("*").eq("dispatch_date", dispatch_date).execute().data
     unassigned = client.table("unassigned_loads").select("*").eq("dispatch_date", dispatch_date).execute().data
 
@@ -624,9 +632,13 @@ def get_sites(user=Depends(verify_token)):
 # ---- Sync status ----
 @app.get("/api/sync/status")
 def get_sync_status(user=Depends(verify_token)):
-    client = get_supabase()
-    rows = client.table("sync_log").select("*").order("synced_at", desc=True).limit(20).execute().data
-    return rows
+    try:
+        client = get_supabase()
+        rows = client.table("sync_log").select("*").order("synced_at", desc=True).limit(20).execute().data
+        return rows
+    except Exception as e:
+        log.exception(f"get_sync_status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
