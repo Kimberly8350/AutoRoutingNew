@@ -436,10 +436,14 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
 
     # Load ALL driver_schedules for the date (all attendance states)
     # so the board can render every driver column and flag exceptions.
+    # Only return drivers expected to work — attendance_expected=1.
+    # Drivers with loads but not on this list will still appear as exceptions
+    # (seeded from dispatch_results / pre_assigned on the frontend).
     driver_rows = (
         client.table("driver_schedules")
         .select("driver_id,first_name,last_name,board_location,attendance_expected,driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours")
         .eq("shift_date", dispatch_date)
+        .eq("attendance_expected", 1)
         .execute()
         .data
     )

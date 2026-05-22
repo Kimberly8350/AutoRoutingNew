@@ -562,44 +562,22 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
                     {/* Driver header */}
                     {(() => {
                       const sched = col as any
-                      const notWorking = sched.attendance_expected === 0
-                      const unscheduled = sched.attendance_expected === null
-                      const confirmed = false // attendance_confirmed column not yet in DB
-                      const isException = notWorking || unscheduled
+                      // attendance_expected===null means driver has loads but wasn't
+                      // on the schedule — flag as an exception (like the * in legacy system)
+                      const isException = sched.attendance_expected === null
                       return (
                         <div style={{
                           padding: '10px 12px',
                           borderBottom: '1px solid var(--border)',
-                          background: notWorking
-                            ? 'rgba(239,68,68,0.08)'
-                            : unscheduled
+                          background: isException
                             ? 'rgba(245,158,11,0.08)'
                             : 'var(--surface-overlay)',
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', marginBottom: '3px' }}>
-                            <span style={{
-                              fontWeight: 600,
-                              fontSize: '13px',
-                              color: notWorking ? '#f87171' : 'var(--text)',
-                              textDecoration: notWorking ? 'line-through' : 'none',
-                            }}>
-                              {col.driver_name}
+                            <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text)' }}>
+                              {isException ? '* ' : ''}{col.driver_name}
                             </span>
-                            {confirmed && (
-                              <span style={{
-                                fontSize: '10px', fontWeight: 700,
-                                padding: '1px 5px', borderRadius: '3px',
-                                background: 'rgba(22,163,74,0.15)', color: '#16a34a',
-                              }}>✓ CONF</span>
-                            )}
-                            {notWorking && (
-                              <span style={{
-                                fontSize: '10px', fontWeight: 700,
-                                padding: '1px 5px', borderRadius: '3px',
-                                background: 'rgba(239,68,68,0.15)', color: '#f87171',
-                              }}>OUT</span>
-                            )}
-                            {unscheduled && col.loads.length > 0 && (
+                            {isException && (
                               <span style={{
                                 fontSize: '10px', fontWeight: 700,
                                 padding: '1px 5px', borderRadius: '3px',
