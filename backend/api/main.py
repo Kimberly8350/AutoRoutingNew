@@ -164,8 +164,12 @@ async def run_dispatch(
     # the engine — this allows get_travel_mins_sync to call the Google Maps API
     # via loop.run_until_complete() rather than always falling back to haversine.
     import asyncio
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, engine.run)
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, engine.run)
+    except Exception as e:
+        log.exception(f"run_dispatch engine error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
     # Persist results to Supabase in background
     background_tasks.add_task(persist_dispatch_result, client, result, user)
