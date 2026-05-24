@@ -138,14 +138,25 @@ async def run_dispatch(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-    client = get_supabase()
+    try:
+        client = get_supabase()
 
-    # Load all reference data
-    yards = load_yards(client)
-    terminals = load_terminals(client)
-    sites = load_sites(client)
-    drivers = load_drivers_for_date(client, dispatch_date, yards)
-    loads = load_loads_for_date(client, dispatch_date)
+        # Load all reference data
+        yards = load_yards(client)
+        log.info(f"run_dispatch: loaded {len(yards)} yards")
+        terminals = load_terminals(client)
+        log.info(f"run_dispatch: loaded {len(terminals)} terminals")
+        sites = load_sites(client)
+        log.info(f"run_dispatch: loaded {len(sites)} sites")
+        drivers = load_drivers_for_date(client, dispatch_date, yards)
+        log.info(f"run_dispatch: loaded {len(drivers)} drivers")
+        loads = load_loads_for_date(client, dispatch_date)
+        log.info(f"run_dispatch: loaded {len(loads)} loads")
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception(f"run_dispatch data loading error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
     if not drivers:
         raise HTTPException(status_code=422, detail="No active drivers found for this date.")
