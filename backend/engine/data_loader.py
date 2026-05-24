@@ -61,18 +61,18 @@ def load_yards(client: Client) -> dict[str, Yard]:
     return yards
 
 
-def load_terminals(client: Client) -> dict[int, Terminal]:
+def load_terminals(client: Client) -> dict[str, Terminal]:
     rows = client.table("terminal_locations").select("*").execute().data
     terminals = {}
     for r in rows:
-        tid = r.get("terminal_id")
+        tid = str(r.get("terminal_id") or "").strip()
         if tid:
-            terminals[int(tid)] = Terminal(
-                terminal_id=int(tid),
+            terminals[tid] = Terminal(
+                terminal_id=tid,
                 terminal_name=r.get("terminal_name") or "",
                 latitude=float(r.get("latitude") or 0),
                 longitude=float(r.get("longitude") or 0),
-                abbreviation=r.get("terminal_abbreviation") or "",
+                abbreviation=r.get("terminal_abbreviation") or r.get("terminal_abreviation") or "",
                 address=r.get("terminal_address") or "",
                 city=r.get("city") or "",
                 state=r.get("state") or "",
@@ -134,7 +134,7 @@ def load_driver_terminal_access(client: Client) -> dict[int, set]:
         did = r.get("driver_id")
         tid = r.get("terminal_id")
         if did and tid:
-            access.setdefault(int(did), set()).add(int(tid))
+            access.setdefault(int(did), set()).add(str(tid).strip())
     return access
 
 
@@ -235,11 +235,10 @@ def load_loads_for_date(
         )
         all_rows.extend(rows)
 
-    # Build terminal name → terminal_id lookup so loads with terminal_id=0
-    # can still be matched to the right terminal by name from the ODBC data.
+    # Build terminal name → terminal_id lookup (ODBC string IDs)
     term_rows = client.table("terminal_locations").select("terminal_id, terminal_name").execute().data
-    terminal_name_map: dict[str, int] = {
-        r["terminal_name"].lower().strip(): int(r["terminal_id"])
+    terminal_name_map: dict[str, str] = {
+        r["terminal_name"].lower().strip(): str(r["terminal_id"]).strip()
         for r in term_rows if r.get("terminal_name") and r.get("terminal_id")
     }
 
@@ -260,7 +259,7 @@ def load_loads_for_date(
     # Build site_id → terminal_id fallback map from historical load_details.
     # Loads from the new feed often have no terminal assigned yet (future orders);
     # we infer the most-recently-used terminal for that site as a best guess.
-    site_terminal_fallback: dict[int, int] = {}
+    site_terminal_fallback: dict[int, str] = {}
     try:
         hist_rows = []
         _page_size = 1000
@@ -284,7 +283,7 @@ def load_loads_for_date(
         for hr in hist_rows:
             sid = hr.get("site_id")
             tname = (hr.get("terminal_name") or "").lower().strip()
-            tid = terminal_name_map.get(tname, 0)
+            tid = terminal_name_map.get(tname, "")
             if sid and tid:
                 site_term_counts.setdefault(int(sid), Counter())[tid] += 1
         site_terminal_fallback = {
@@ -297,21 +296,17 @@ def load_loads_for_date(
 
     loads = []
     for ce, r in ce_map.items():
-        # Resolve terminal_id by name first (ODBC terminal IDs differ from our DB IDs).
-        # Name-based lookup is authoritative; fall back to stored ID only if no name match.
+        # Resolve terminal_id by name first (name-based lookup is authoritative).
         terminal_name = r.get("terminal_name") or ""
-        terminal_id = terminal_name_map.get(terminal_name.lower().strip(), 0)
-        # Supabase may return terminal_id as a string — always coerce to int
-        if terminal_id == 0:
-            raw_tid = r.get("terminal_id")
-            try:
-                terminal_id = int(raw_tid) if raw_tid not in (None, "", "None") else 0
-            except (ValueError, TypeError):
-                terminal_id = 0
+        terminal_id = terminal_name_map.get(terminal_name.lower().strip(), "")
+        # Fall back to the raw stored terminal_id (already an ODBC string)
+        if not terminal_id:
+            raw_tid = str(r.get("terminal_id") or "").strip()
+            terminal_id = raw_tid if raw_tid and raw_tid.lower() != "none" else ""
         # Last resort: infer terminal from historical deliveries to this site
-        if terminal_id == 0:
+        if not terminal_id:
             site_id = int(r.get("site_id") or 0)
-            terminal_id = site_terminal_fallback.get(site_id, 0)
+            terminal_id = site_terminal_fallback.get(site_id, "")
             if terminal_id:
                 log.debug(f"ce_id={ce}: inferred terminal_id={terminal_id} from site history")
 

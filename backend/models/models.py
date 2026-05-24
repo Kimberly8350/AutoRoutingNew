@@ -19,7 +19,7 @@ class Yard:
 
 @dataclass
 class Terminal:
-    terminal_id: int
+    terminal_id: str  # ODBC string, e.g. "T-75-TX-2665"
     terminal_name: str
     latitude: float
     longitude: float
@@ -81,7 +81,7 @@ class Load:
     customer_name: str
     order_number: Optional[str]
     site_id: int
-    terminal_id: int
+    terminal_id: str  # ODBC string, e.g. "T-75-TX-2665"
     terminal_name: str
     products: list[LoadProduct]
     load_status: int
