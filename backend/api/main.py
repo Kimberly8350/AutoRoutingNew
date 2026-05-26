@@ -352,6 +352,8 @@ def get_drivers(dispatch_date: str, user=Depends(verify_token)):
         .eq("shift_date", dispatch_date)
         .not_.is_("board_location", "null")
         .neq("board_location", "")
+        .not_.is_("yard", "null")
+        .neq("yard", "")
         .execute()
         .data
     )
@@ -537,6 +539,8 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         .eq("attendance_expected", 1)
         .not_.is_("board_location", "null")
         .neq("board_location", "")
+        .not_.is_("yard", "null")
+        .neq("yard", "")
         .execute()
         .data
     )

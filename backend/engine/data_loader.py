@@ -176,8 +176,8 @@ def load_drivers_for_date(
     drivers = []
     seen = set()
     for r in rows:
-        # Drivers without a board_location are considered inactive (no longer with QW)
-        if not r.get("board_location"):
+        # Drivers without a board_location or yard are considered inactive (no longer with QW)
+        if not r.get("board_location") or not r.get("yard"):
             continue
 
         # attendance_expected overrides driver_schedule
