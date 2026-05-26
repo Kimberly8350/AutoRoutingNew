@@ -431,6 +431,73 @@ def sync_load_details_from_mysql(client: Client) -> dict:
         return {"table": "load_details", "status": "error", "error": str(e)}
 
 
+def sync_driver_exceptions_from_mysql(client: Client) -> dict:
+    """Pull driver OUT exceptions from CE Connect and set attendance_expected=0 in Supabase."""
+    start = time.time()
+
+    if not all([CE_CONNECT_HOST, CE_CONNECT_USER, CE_CONNECT_PASSWORD, CE_CONNECT_DATABASE]):
+        return {"table": "driver_exceptions", "status": "skipped", "reason": "MySQL not configured"}
+
+    try:
+        conn = pymysql.connect(
+            host=CE_CONNECT_HOST, port=CE_CONNECT_PORT,
+            user=CE_CONNECT_USER, password=CE_CONNECT_PASSWORD,
+            database=CE_CONNECT_DATABASE, connect_timeout=15,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        try:
+            # Pull OUT exceptions from both CE Connect exception tables.
+            # dlb_driver_future_schedule_exceptions: current/future exceptions with is_working flag
+            # tbldriverscheduleexceptions: legacy table, Status='OUT' means not working
+            query = """
+                SELECT driver_id, DATE(exception_date) AS exc_date
+                FROM dlb_driver_future_schedule_exceptions
+                WHERE (is_working = 0 OR exception_status = 'OUT')
+                  AND exception_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                  AND exception_date <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+
+                UNION
+
+                SELECT DriverID AS driver_id, DATE(ExceptionDate) AS exc_date
+                FROM tbldriverscheduleexceptions
+                WHERE Status = 'OUT'
+                  AND ExceptionDate >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                  AND ExceptionDate <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+            """
+            with conn.cursor() as cur:
+                cur.execute(query)
+                exceptions = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"MySQL driver exception fetch failed: {e}")
+        return {"table": "driver_exceptions", "status": "error", "error": str(e)}
+
+    if not exceptions:
+        return {"table": "driver_exceptions", "status": "ok", "rows_updated": 0}
+
+    updated = 0
+    for exc in exceptions:
+        driver_id = exc.get("driver_id")
+        exc_date = exc.get("exc_date")
+        if not driver_id or not exc_date:
+            continue
+        exc_date_str = exc_date.isoformat() if hasattr(exc_date, "isoformat") else str(exc_date)
+        try:
+            client.table("driver_schedules") \
+                .update({"attendance_expected": 0}) \
+                .eq("driver_id", driver_id) \
+                .eq("shift_date", exc_date_str) \
+                .execute()
+            updated += 1
+        except Exception as e:
+            log.warning(f"driver_exceptions: could not update driver {driver_id} on {exc_date_str}: {e}")
+
+    duration_ms = int((time.time() - start) * 1000)
+    log.info(f"✓ driver_exceptions: {updated} attendance rows cleared in {duration_ms}ms")
+    return {"table": "driver_exceptions", "status": "ok", "rows_updated": updated}
+
+
 def sync_table(client: Client, table: str, filename: str) -> dict:
     start = time.time()
     filepath = EXCEL_DIR / filename
@@ -558,6 +625,8 @@ def run_sync():
         results.append(result)
     # load_details comes from CE Connect MySQL, not Excel
     results.append(sync_load_details_from_mysql(client))
+    # Exceptions override attendance — must run after driver_schedules Excel sync
+    results.append(sync_driver_exceptions_from_mysql(client))
     errors = [r for r in results if r.get("status") == "error"]
     if errors:
         log.warning(f"Sync complete with {len(errors)} error(s)")
