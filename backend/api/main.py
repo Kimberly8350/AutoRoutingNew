@@ -518,11 +518,10 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             break
         _pa_offset += 1000
 
-    # Load ALL driver_schedules for the date (all attendance states)
-    # so the board can render every driver column and flag exceptions.
-    # Only return drivers expected to work — attendance_expected=1.
-    # Drivers with loads but not on this list will still appear as exceptions
-    # (seeded from dispatch_results / pre_assigned on the frontend).
+    # Only return drivers scheduled for this date (attendance_expected=1).
+    # This is the sole source of truth for who appears on the board —
+    # dispatch_results are filtered to this set before returning so that
+    # former employees or off-schedule drivers don't create ghost columns.
     driver_rows = (
         client.table("driver_schedules")
         .select("driver_id,first_name,last_name,board_location,attendance_expected,driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours")
@@ -531,6 +530,12 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         .execute()
         .data
     )
+
+    scheduled_driver_ids = {r["driver_id"] for r in driver_rows}
+
+    # Strip dispatch_results for drivers not on today's schedule so stale
+    # results from past runs (or inactive employees) don't create board columns.
+    results = [r for r in results if r.get("driver_id") in scheduled_driver_ids]
     driver_name_map: dict[str, dict] = {
         f"{d['first_name']} {d['last_name']}".strip().lower(): d
         for d in driver_rows

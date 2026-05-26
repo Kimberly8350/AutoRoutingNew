@@ -90,20 +90,11 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
     }
 
     // --- Step 2: Apply dispatch results (routed loads) ---
+    // Only add loads to columns already seeded from driver_schedules.
+    // Drivers not in the schedule (inactive, off-shift) are skipped — they
+    // will not create ghost columns regardless of saved dispatch_results.
     for (const row of (dispatch_results || [])) {
-      // Create column if driver wasn't in schedule (working extra / unscheduled)
-      if (!driverMap[row.driver_id]) {
-        driverMap[row.driver_id] = {
-          driver_id: row.driver_id,
-          driver_name: row.driver_name,
-          board_location: row.board_location || 'TX-AM',
-          loads: [],
-          attendance_expected: null,  // not in schedule = exception
-          driver_schedule: null,
-          attendance_confirmed: null,
-          start_time: null,
-        } as any
-      }
+      if (!driverMap[row.driver_id]) continue
       const load = loadMap[row.ce_id]
       if (load) {
         driverMap[row.driver_id].loads.push({
@@ -117,19 +108,10 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
     }
 
     // --- Step 3: Merge pre-assigned loads (status > 1) ---
+    // Backend already filters pre_assigned to scheduled drivers only.
+    // Skip any that don't match a scheduled column as a safety net.
     for (const row of (pre_assigned || [])) {
-      if (!driverMap[row.driver_id]) {
-        driverMap[row.driver_id] = {
-          driver_id: row.driver_id,
-          driver_name: row.driver_name,
-          board_location: row.board_location || 'TX-AM',
-          loads: [],
-          attendance_expected: null,
-          driver_schedule: null,
-          attendance_confirmed: null,
-          start_time: null,
-        } as any
-      }
+      if (!driverMap[row.driver_id]) continue
       const load = loadMap[row.ce_id]
       // Skip duplicates already added via dispatch_results
       if (driverMap[row.driver_id].loads.some((l: any) => l.ce_id === row.ce_id)) continue
