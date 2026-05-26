@@ -1,6 +1,7 @@
 """
 AutoRouting Data Sync Script
-Reads Excel files (refreshed from ODBC) and pushes to Supabase every 5 minutes.
+- load_details: queried directly from CE Connect MySQL (vw_undelivered_loads)
+- all other tables: read from local Excel files
 Run: python sync.py
      python sync.py --once   (single run, no loop)
 """
@@ -16,6 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+import pymysql
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -35,25 +37,86 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 EXCEL_DIR = Path(os.getenv("EXCEL_DIR", "."))
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "300"))  # 5 min default
 
+# CE Connect MySQL connection (load_details only)
+CE_CONNECT_HOST = os.getenv("CE_CONNECT_HOST", "")
+CE_CONNECT_PORT = int(os.getenv("CE_CONNECT_PORT", "3306"))
+CE_CONNECT_USER = os.getenv("CE_CONNECT_USER", "")
+CE_CONNECT_PASSWORD = os.getenv("CE_CONNECT_PASSWORD", "")
+CE_CONNECT_DATABASE = os.getenv("CE_CONNECT_DATABASE", "")
+
+# load_details is now sourced from MySQL — not Excel
 EXCEL_FILES = {
     "yard_locations": "Yard_Locations.xlsx",
     "terminal_locations": "terminal_locations.xlsx",
     "site_details": "site_details.xlsx",
-    "driver_schedules": "Auto_Routing_Driver_Schedule.xlsx",   # live ODBC file (no 's' in Driver)
+    "driver_schedules": "Auto_Routing_Driver_Schedule.xlsx",
     "driver_terminal_cards": "Driver_terminal_cards.xlsx",
-    "load_details": "Loads Feed for Kim 2.0.xlsx",
 }
 
-# Some Excel files have multiple sheets; specify which sheet to read for each table.
-SHEET_NAMES = {
-    "load_details": "dlb_order_drop_details",
-}
+SHEET_NAMES: dict[str, str] = {}  # no multi-sheet Excel files remain
 
 
 def get_client() -> Client:
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in .env")
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+
+def fetch_loads_from_mysql() -> pd.DataFrame:
+    """Query vw_undelivered_loads from CE Connect and return a DataFrame."""
+    conn = pymysql.connect(
+        host=CE_CONNECT_HOST,
+        port=CE_CONNECT_PORT,
+        user=CE_CONNECT_USER,
+        password=CE_CONNECT_PASSWORD,
+        database=CE_CONNECT_DATABASE,
+        connect_timeout=15,
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+    try:
+        # Reconstruct load feed from base tables — equivalent to vw_undelivered_loads.
+        # Excludes deleted (status=0) and limits to last 60 days.
+        query = """
+            SELECT
+                od.drop_id                                                              AS CE_ID,
+                DATE(od.drop_schedule_date)                                             AS Delivery_Date,
+                cust.customer_name                                                      AS Customer_Name,
+                od.drop_order_number                                                    AS Order_Number,
+                od.location_id                                                          AS Site_ID,
+                term.terminal_id                                                        AS Terminal_ID,
+                term.terminal_name                                                      AS Terminal_Name,
+                prod.product_name                                                       AS Product_Name,
+                COALESCE(NULLIF(odd.drop_detail_gross_gallons, 0), odd.drop_detail_ordered) AS Gallons_Ordered,
+                dest.destination_name                                                   AS Destination_Name,
+                dest.destination_address                                                AS Address,
+                dest.destination_city                                                   AS City,
+                dest.destination_state                                                  AS State,
+                drv.driver_first_name                                                   AS First_Name,
+                drv.driver_last_name                                                    AS Last_Name,
+                od.drop_start_window                                                    AS Window_Start,
+                od.drop_end_window                                                      AS Window_End,
+                od.drop_eta_time                                                        AS Delivery_ETA,
+                od.drop_arrived_at_rack_time                                            AS Arrived_At_Rack_Time,
+                od.drop_finalized_delivery_time                                         AS Completed_Delivery_Time,
+                od.drop_status_id                                                       AS Load_Status
+            FROM dlb_order_drops od
+            JOIN  dlb_order_drop_details odd ON odd.drop_id      = od.drop_id
+            LEFT JOIN dl_destinations    dest ON dest.destination_id = od.location_id
+            LEFT JOIN dl_customers       cust ON cust.customer_id    = od.customer_id
+            LEFT JOIN dl_products        prod ON prod.product_id     = odd.product_id
+            LEFT JOIN dl_cards           card ON card.card_id        = odd.card_id
+            LEFT JOIN dl_terminals       term ON term.terminal_id    = card.terminal_id
+            LEFT JOIN dlb_routes         rt   ON rt.route_id         = od.route_id
+            LEFT JOIN dl_drivers         drv  ON drv.driver_id       = rt.driver_id
+            WHERE od.drop_schedule_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+              AND od.drop_status_id != 0
+        """
+        with conn.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+        return pd.DataFrame(rows)
+    finally:
+        conn.close()
 
 
 # ---------- transformers per table ----------
@@ -190,10 +253,11 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
     df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
 
-    # Normalize column names from "Loads Feed for Kim 2.0.xlsx" to DB schema.
+    # Normalize vw_undelivered_loads column names to the DB schema.
     df = df.rename(columns={
-        "gallons_ordered":     "gross_gallons",    # Gallons_Ordered → gross_gallons
-        "address":             "site_address",     # Address → site_address
+        "gallons_ordered":      "gross_gallons",   # Gallons_Ordered  → gross_gallons
+        "destination_name":     "site_name",       # Destination_Name → site_name
+        "address":              "site_address",    # Address          → site_address
         "arrived_at_rack_time": "arrived_at_rack", # Arrived_At_Rack_Time → arrived_at_rack
     })
 
@@ -278,11 +342,94 @@ TRANSFORMERS = {
     "site_details": transform_site_details,
     "driver_schedules": transform_driver_schedules,
     "driver_terminal_cards": transform_driver_terminal_cards,
-    "load_details": transform_load_details,
 }
 
 
 # ---------- sync logic ----------
+
+def sync_load_details_from_mysql(client: Client) -> dict:
+    """Fetch load_details from CE Connect MySQL and upsert into Supabase."""
+    start = time.time()
+
+    if not all([CE_CONNECT_HOST, CE_CONNECT_USER, CE_CONNECT_PASSWORD, CE_CONNECT_DATABASE]):
+        log.warning("CE Connect MySQL not configured — skipping load_details sync. "
+                    "Set CE_CONNECT_HOST/USER/PASSWORD/DATABASE in .env")
+        return {"table": "load_details", "status": "skipped", "reason": "MySQL not configured"}
+
+    try:
+        df = fetch_loads_from_mysql()
+        log.info(f"Fetched {len(df)} rows from vw_undelivered_loads")
+    except Exception as e:
+        log.error(f"MySQL fetch failed: {e}")
+        try:
+            client.table("sync_log").insert({
+                "table_name": "load_details",
+                "status": "error",
+                "error_message": str(e)[:500],
+            }).execute()
+        except Exception:
+            pass
+        return {"table": "load_details", "status": "error", "error": str(e)}
+
+    try:
+        records = transform_load_details(df)
+    except Exception as e:
+        log.error(f"Transform failed for load_details: {e}")
+        return {"table": "load_details", "status": "error", "error": str(e)}
+
+    if not records:
+        return {"table": "load_details", "status": "ok", "rows_upserted": 0}
+
+    try:
+        # Skip rows already locked at status=1 (ready-to-route in Supabase)
+        locked_rows = (
+            client.table("load_details")
+            .select("ce_id,product_name")
+            .eq("load_status", 1)
+            .execute()
+            .data
+        )
+        locked_keys = {(r["ce_id"], r["product_name"]) for r in locked_rows}
+        if locked_keys:
+            before = len(records)
+            records = [
+                r for r in records
+                if (r.get("ce_id"), r.get("product_name")) not in locked_keys
+            ]
+            log.info(f"load_details: skipping {before - len(records)} locked (status=1) rows")
+
+        chunk_size = 500
+        total_upserted = 0
+        for i in range(0, len(records), chunk_size):
+            chunk = records[i : i + chunk_size]
+            client.table("load_details").upsert(chunk, on_conflict="ce_id,product_name").execute()
+            total_upserted += len(chunk)
+
+        duration_ms = int((time.time() - start) * 1000)
+        log.info(f"✓ load_details: {total_upserted} rows upserted in {duration_ms}ms")
+
+        client.table("sync_log").insert({
+            "table_name": "load_details",
+            "rows_upserted": total_upserted,
+            "rows_deleted": 0,
+            "status": "success",
+            "duration_ms": duration_ms,
+        }).execute()
+
+        return {"table": "load_details", "status": "ok", "rows_upserted": total_upserted}
+
+    except Exception as e:
+        log.error(f"Upsert failed for load_details: {e}")
+        try:
+            client.table("sync_log").insert({
+                "table_name": "load_details",
+                "status": "error",
+                "error_message": str(e)[:500],
+            }).execute()
+        except Exception:
+            pass
+        return {"table": "load_details", "status": "error", "error": str(e)}
+
 
 def sync_table(client: Client, table: str, filename: str) -> dict:
     start = time.time()
@@ -312,11 +459,6 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
         df = pd.read_excel(read_path, sheet_name=sheet)
         log.info(f"Read {len(df)} rows from {filename}" + (f" (sheet: {sheet!r})" if sheet != 0 else ""))
 
-        # Loads Feed for Kim 2.0: driver names and terminal names are already
-        # in the main sheet — no secondary sheet merge needed.
-        # Just normalize column casing.
-        if table == "load_details":
-            df.columns = [c.strip().lower() for c in df.columns]
     except Exception as e:
         log.error(f"Failed to read {filename}: {e}")
         return {"table": table, "status": "error", "error": str(e)}
@@ -326,18 +468,6 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
                 os.remove(tmp_path)
             except Exception:
                 pass
-
-    # For load_details, only sync records from the last 60 days to keep sync fast.
-    # Historical data is already in Supabase; we just need to keep recent loads current.
-    # Use case-insensitive column lookup so this works with both old and new file formats.
-    if table == "load_details":
-        date_col = next((c for c in df.columns if c.lower().strip() == "delivery_date"), None)
-        if date_col:
-            cutoff = pd.Timestamp(datetime.now() - timedelta(days=60))
-            dates = pd.to_datetime(df[date_col], errors="coerce")
-            original_count = len(df)
-            df = df[dates.isna() | (dates >= cutoff)].copy()
-            log.info(f"load_details: filtered {original_count} → {len(df)} rows (last 60 days)")
 
     transform_fn = TRANSFORMERS.get(table)
     if not transform_fn:
@@ -359,21 +489,6 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
     }
 
     try:
-        # For load_details: skip any records that are already manually set to
-        # load_status=1 in Supabase — those are "ready to route" and should not
-        # be overwritten by a fresh ODBC pull until dispatch processes them.
-        if table == "load_details" and records:
-            locked_rows = client.table("load_details").select("ce_id,product_name") \
-                .eq("load_status", 1).execute().data
-            locked_keys = {(r["ce_id"], r["product_name"]) for r in locked_rows}
-            if locked_keys:
-                before = len(records)
-                records = [
-                    r for r in records
-                    if (r.get("ce_id"), r.get("product_name")) not in locked_keys
-                ]
-                log.info(f"load_details: skipping {before - len(records)} locked (status=1) rows")
-
         # Upsert in chunks to avoid request size limits
         chunk_size = 500
         total_upserted = 0
@@ -419,6 +534,8 @@ def run_sync():
     for table, filename in EXCEL_FILES.items():
         result = sync_table(client, table, filename)
         results.append(result)
+    # load_details comes from CE Connect MySQL, not Excel
+    results.append(sync_load_details_from_mysql(client))
     errors = [r for r in results if r.get("status") == "error"]
     if errors:
         log.warning(f"Sync complete with {len(errors)} error(s)")
