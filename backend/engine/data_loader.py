@@ -187,8 +187,12 @@ def load_drivers_for_date(
         if not r.get("board_location") or not r.get("yard"):
             continue
 
+        did = r.get("driver_id")
+        if not did or did in seen:
+            continue
+
         # Skip permanently deactivated drivers
-        if did and int(did) in inactive_ids:
+        if int(did) in inactive_ids:
             continue
 
         # attendance_expected overrides driver_schedule
@@ -196,9 +200,6 @@ def load_drivers_for_date(
         if not is_working:
             continue
 
-        did = r.get("driver_id")
-        if not did or did in seen:
-            continue
         seen.add(int(did))
 
         start_t = _parse_time(r.get("driver_start_time")) or time(6, 0)
