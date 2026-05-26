@@ -282,7 +282,6 @@ async def persist_dispatch_result(client: Client, result, user):
                     "site_name": stop.site.site_name if stop.site else "",
                     "site_city": stop.site.city if stop.site else "",
                     "terminal_name": stop.terminal.terminal_name if stop.terminal else "",
-                    "terminal_id": stop.terminal.terminal_id if stop.terminal else None,
                     "eta": stop.arrive_site.isoformat() if stop.arrive_site else None,
                     "drive_to_terminal_mins": stop.drive_to_terminal_mins,
                     "drive_to_site_mins": stop.drive_to_site_mins,
@@ -311,6 +310,7 @@ async def persist_dispatch_result(client: Client, result, user):
         log.info(f"Persisted dispatch run {run_id}")
     except Exception as e:
         log.error(f"Failed to persist dispatch: {e}")
+        raise
 
 
 # ---- Loads ----
