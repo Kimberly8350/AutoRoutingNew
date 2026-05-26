@@ -346,7 +346,15 @@ def delete_load(ce_id: int, user=Depends(verify_token)):
 @app.get("/api/drivers")
 def get_drivers(dispatch_date: str, user=Depends(verify_token)):
     client = get_supabase()
-    rows = client.table("driver_schedules").select("*").eq("shift_date", dispatch_date).execute().data
+    rows = (
+        client.table("driver_schedules")
+        .select("*")
+        .eq("shift_date", dispatch_date)
+        .not_.is_("board_location", "null")
+        .neq("board_location", "")
+        .execute()
+        .data
+    )
     return rows
 
 
@@ -527,6 +535,8 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         .select("driver_id,first_name,last_name,board_location,attendance_expected,driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours")
         .eq("shift_date", dispatch_date)
         .eq("attendance_expected", 1)
+        .not_.is_("board_location", "null")
+        .neq("board_location", "")
         .execute()
         .data
     )
