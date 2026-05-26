@@ -336,8 +336,17 @@ class RoutingEngine:
         Only seeds loads for the current dispatch_date — adjacent-day loads
         (from the ±1 day data window) must NOT be seeded, otherwise yesterday's
         delivered loads would fill driver capacity before today's dispatch begins.
+
+        Additionally, loads whose window/eta predates the driver's shift start are
+        from a previous dispatch board (e.g. a PM driver's 05/26 overnight loads
+        carrying delivery_date=05/27) and must not consume capacity on today's board.
         """
         dispatch_date_str = str(self.dispatch_date)
+        dispatch_day_start = datetime(
+            self.dispatch_date.year, self.dispatch_date.month, self.dispatch_date.day
+        )
+        driver_lookup = {d.driver_id: d for d in self.drivers}
+
         # Group locked loads by driver
         driver_locked: dict[int, list[Load]] = {}
         for load in self.loads:
@@ -348,6 +357,23 @@ class RoutingEngine:
             # Exclude adjacent-day loads — only seed today's locked loads
             if load.delivery_date and load.delivery_date[:10] != dispatch_date_str:
                 continue
+            # Exclude loads that belong to a previous dispatch board.
+            # If a load's window_start (or delivery_eta fallback) predates this
+            # driver's shift start on dispatch_date, it was dispatched on an earlier
+            # board (e.g. previous evening's PM run) and must not count against today.
+            driver = driver_lookup.get(load.assigned_driver_id)
+            if driver and driver.start_time:
+                driver_shift_start = dispatch_day_start.replace(
+                    hour=driver.start_time.hour,
+                    minute=driver.start_time.minute,
+                )
+                load_time = load.window_start or load.delivery_eta
+                if load_time is not None and load_time < driver_shift_start:
+                    log.debug(
+                        f"Skipping seed ce_id={load.ce_id}: load time {load_time} "
+                        f"predates driver {load.assigned_driver_id} shift start {driver_shift_start}"
+                    )
+                    continue
             driver_locked.setdefault(load.assigned_driver_id, []).append(load)
 
         for driver_id, locked_loads in driver_locked.items():
