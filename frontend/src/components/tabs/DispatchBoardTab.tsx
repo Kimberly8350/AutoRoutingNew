@@ -440,33 +440,95 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
         </div>
       )}
 
-      {/* Unassigned panel */}
-      {showUnassigned && unassigned.length > 0 && (
+      {/* Assigned loads list panel */}
+      {showAssigned && (
         <div style={{
           padding: '12px 20px',
           background: 'var(--surface-sunken)',
           borderBottom: '1px solid var(--border)',
-          maxHeight: '200px',
+          maxHeight: '260px',
           overflowY: 'auto',
         }}>
-          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
-            Unassigned Loads
+          <div style={{ fontSize: '12px', fontWeight: 600, color: '#16a34a', marginBottom: '8px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Assigned Loads — {totals.assigned} total
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {unassigned.map(u => (
-              <div key={u.id} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '6px 10px',
-                background: 'rgba(239,68,68,0.06)',
-                border: '1px solid rgba(239,68,68,0.15)',
-                borderRadius: '4px',
-                fontSize: '12px',
-              }}>
-                <span style={{ color: 'var(--text)' }}>{u.site_name} (CE#{u.ce_id})</span>
-                <span style={{ color: '#f87171', fontFamily: 'var(--font-mono)' }}>{u.reason}</span>
-              </div>
-            ))}
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <thead>
+              <tr style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>CE ID</th>
+                <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Driver</th>
+                <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Terminal</th>
+                <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Site</th>
+                <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>City</th>
+                <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 500 }}>Seq</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.values(boards).flat().flatMap(col =>
+                col.loads
+                  .filter((l: any) => !l.pre_assigned)
+                  .map((load: any) => ({ load, driver: col.driver_name, board: col.board_location }))
+              ).sort((a, b) => {
+                if (a.board !== b.board) return a.board.localeCompare(b.board)
+                return a.driver.localeCompare(b.driver)
+              }).map(({ load, driver }) => (
+                <tr key={load.ce_id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text)' }}>
+                  <td style={{ padding: '5px 8px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{load.ce_id}</td>
+                  <td style={{ padding: '5px 8px', fontWeight: 500 }}>{driver}</td>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-muted)' }}>{load.terminal_name || '—'}</td>
+                  <td style={{ padding: '5px 8px' }}>{load.site_name || '—'}</td>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-muted)' }}>{load.site_city || load.city || '—'}</td>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{load.sequence ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {totals.assigned === 0 && (
+            <div style={{ color: 'var(--text-dim)', fontSize: '12px', fontFamily: 'var(--font-mono)', padding: '12px 0' }}>
+              No assigned loads. Run Dispatch first.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Unassigned loads list panel */}
+      {showUnassigned && (
+        <div style={{
+          padding: '12px 20px',
+          background: 'var(--surface-sunken)',
+          borderBottom: '1px solid var(--border)',
+          maxHeight: '260px',
+          overflowY: 'auto',
+        }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: '#f87171', marginBottom: '8px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Unassigned Loads — {totals.unassigned} total
           </div>
+          {unassigned.length === 0 ? (
+            <div style={{ color: 'var(--text-dim)', fontSize: '12px', fontFamily: 'var(--font-mono)', padding: '8px 0' }}>
+              No unassigned loads. Run Dispatch to see results.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                  <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>CE ID</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Site</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Terminal</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unassigned.map(u => (
+                  <tr key={u.id ?? u.ce_id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text)' }}>
+                    <td style={{ padding: '5px 8px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{u.ce_id}</td>
+                    <td style={{ padding: '5px 8px' }}>{u.site_name || '—'}</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-muted)' }}>{u.terminal_name || '—'}</td>
+                    <td style={{ padding: '5px 8px', color: '#f87171', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{u.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
