@@ -488,6 +488,28 @@ def sync_table(client: Client, table: str, filename: str) -> dict:
         "load_details": "ce_id,product_name",
     }
 
+    # Preserve dispatcher-set attendance_expected — don't let the Excel overwrite manual toggles.
+    # New rows (first appearance for a shift_date) get the Excel value; existing rows keep Supabase value.
+    if table == "driver_schedules":
+        try:
+            existing = (
+                client.table("driver_schedules")
+                .select("record_id,attendance_expected")
+                .execute()
+                .data
+            )
+            existing_att = {
+                r["record_id"]: r["attendance_expected"]
+                for r in existing
+                if r.get("record_id") is not None
+            }
+            for r in records:
+                rid = r.get("record_id")
+                if rid in existing_att and existing_att[rid] is not None:
+                    r["attendance_expected"] = existing_att[rid]
+        except Exception as e:
+            log.warning(f"driver_schedules: could not fetch existing attendance values — sync will overwrite: {e}")
+
     try:
         # Upsert in chunks to avoid request size limits
         chunk_size = 500
