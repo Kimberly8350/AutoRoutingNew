@@ -356,7 +356,39 @@ def get_drivers(dispatch_date: str, user=Depends(verify_token)):
         .execute()
         .data
     )
+    try:
+        inactive = client.table("driver_inactive").select("driver_id").execute().data
+        inactive_ids = {r["driver_id"] for r in inactive}
+        if inactive_ids:
+            rows = [r for r in rows if r.get("driver_id") not in inactive_ids]
+    except Exception:
+        pass
     return rows
+
+
+@app.get("/api/drivers/inactive")
+def get_inactive_drivers(user=Depends(verify_token)):
+    client = get_supabase()
+    rows = client.table("driver_inactive").select("*").order("last_name").execute().data
+    return rows
+
+
+@app.post("/api/drivers/{driver_id}/deactivate")
+def deactivate_driver(driver_id: int, body: dict, user=Depends(verify_token)):
+    client = get_supabase()
+    client.table("driver_inactive").upsert({
+        "driver_id": driver_id,
+        "first_name": body.get("first_name", ""),
+        "last_name": body.get("last_name", ""),
+    }).execute()
+    return {"status": "ok"}
+
+
+@app.delete("/api/drivers/{driver_id}/deactivate")
+def reactivate_driver(driver_id: int, user=Depends(verify_token)):
+    client = get_supabase()
+    client.table("driver_inactive").delete().eq("driver_id", driver_id).execute()
+    return {"status": "ok"}
 
 
 @app.patch("/api/drivers/{driver_id}/attendance")

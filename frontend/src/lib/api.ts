@@ -53,6 +53,14 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ shift_date: shiftDate, attendance_expected: attendance }),
     }),
+  getInactiveDrivers: () => apiFetch('/api/drivers/inactive'),
+  deactivateDriver: (driverId: number, firstName: string, lastName: string) =>
+    apiFetch(`/api/drivers/${driverId}/deactivate`, {
+      method: 'POST',
+      body: JSON.stringify({ first_name: firstName, last_name: lastName }),
+    }),
+  reactivateDriver: (driverId: number) =>
+    apiFetch(`/api/drivers/${driverId}/deactivate`, { method: 'DELETE' }),
 
   // Terminal access
   getTerminalAccess: () => apiFetch('/api/terminal-access'),

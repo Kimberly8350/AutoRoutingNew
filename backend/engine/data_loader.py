@@ -170,6 +170,13 @@ def load_drivers_for_date(
         .data
     )
 
+    # Exclude permanently inactive drivers (no longer with company)
+    try:
+        inactive_rows = client.table("driver_inactive").select("driver_id").execute().data
+        inactive_ids = {r["driver_id"] for r in inactive_rows}
+    except Exception:
+        inactive_ids = set()
+
     terminal_access = load_driver_terminal_access(client)
     restrictions = load_driver_restrictions(client)
 
@@ -178,6 +185,10 @@ def load_drivers_for_date(
     for r in rows:
         # Drivers without a board_location or yard are considered inactive (no longer with QW)
         if not r.get("board_location") or not r.get("yard"):
+            continue
+
+        # Skip permanently deactivated drivers
+        if did and int(did) in inactive_ids:
             continue
 
         # attendance_expected overrides driver_schedule
