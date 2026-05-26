@@ -204,9 +204,19 @@ class RoutingEngine:
             loaded_miles = haversine_miles(terminal.latitude, terminal.longitude, site.latitude, site.longitude)
             arrive_site_raw = depart_terminal + timedelta(minutes=drive_to_site_mins)
 
-            # Delivery window logic
+            # Delivery window logic.
+            # Overdue loads (window_end before dispatch day) have no enforceable window —
+            # treat as anytime so the engine can still dispatch them.
+            dispatch_day_start = datetime(
+                self.dispatch_date.year, self.dispatch_date.month, self.dispatch_date.day
+            )
+            is_overdue = (
+                not load.is_anytime
+                and load.window_end is not None
+                and load.window_end < dispatch_day_start
+            )
             wait_mins = 0.0
-            if not load.is_anytime and load.window_start:
+            if not load.is_anytime and not is_overdue and load.window_start:
                 earliest_allowed = load.window_start - timedelta(minutes=EARLY_ALLOWANCE_MINS)
                 if arrive_site_raw < earliest_allowed:
                     # Wait at site or staging
@@ -214,7 +224,6 @@ class RoutingEngine:
                     arrive_site_raw = earliest_allowed
 
                 if load.window_end:
-                    latest_allowed = load.window_end + timedelta(minutes=LATE_ALLOWANCE_MINS)
                     reject_after = load.window_end + timedelta(minutes=REJECT_LATE_MINS)
                     if arrive_site_raw > reject_after:
                         return None  # missed window
@@ -323,13 +332,21 @@ class RoutingEngine:
         Always runs (not just in reroute mode) so that pre-assigned and
         in-progress loads always appear on the correct driver regardless of
         whether this is a fresh dispatch or a reroute.
+
+        Only seeds loads for the current dispatch_date — adjacent-day loads
+        (from the ±1 day data window) must NOT be seeded, otherwise yesterday's
+        delivered loads would fill driver capacity before today's dispatch begins.
         """
+        dispatch_date_str = str(self.dispatch_date)
         # Group locked loads by driver
         driver_locked: dict[int, list[Load]] = {}
         for load in self.loads:
             if load.load_status not in LOCKED_STATUSES:
                 continue
             if not load.assigned_driver_id:
+                continue
+            # Exclude adjacent-day loads — only seed today's locked loads
+            if load.delivery_date and load.delivery_date[:10] != dispatch_date_str:
                 continue
             driver_locked.setdefault(load.assigned_driver_id, []).append(load)
 
@@ -423,6 +440,11 @@ class RoutingEngine:
 
         for load in remaining_loads:
             failure_reasons = []
+            # Separate reasons from drivers who could actually access the terminal vs.
+            # those who failed the terminal-access check (zero-terminal or wrong terminal).
+            # This prevents "no terminal access" from masking the real failure reason
+            # when some drivers DO have access but fail for another reason.
+            terminal_eligible_reasons = []
             best_route = None
             best_driver = None
             best_score = float("inf")
@@ -437,10 +459,14 @@ class RoutingEngine:
                 elig_fail = self._check_driver_eligible(driver, load)
                 if elig_fail:
                     failure_reasons.append(elig_fail)
+                    # Only track reasons from drivers who passed terminal access
+                    if "terminal" not in elig_fail.lower():
+                        terminal_eligible_reasons.append(elig_fail)
                     continue
 
                 if not driver.yard_location:
                     failure_reasons.append("Driver unavailable.")
+                    terminal_eligible_reasons.append("Driver unavailable.")
                     continue
 
                 current_route = self.routes.get(driver.driver_id)
@@ -448,6 +474,7 @@ class RoutingEngine:
                 if current_route:
                     if len(current_route.stops) >= 4:
                         failure_reasons.append("Shift time exceeded.")
+                        terminal_eligible_reasons.append("Shift time exceeded.")
                         continue
                     current_stops = [
                         (self._find_load_by_ce(s.ce_id), s.sequence)
@@ -460,6 +487,7 @@ class RoutingEngine:
                     diesel_wet_fail = self._check_diesel_wet_sequence(driver, load, pos)
                     if diesel_wet_fail:
                         failure_reasons.append(diesel_wet_fail)
+                        terminal_eligible_reasons.append(diesel_wet_fail)
                         continue
 
                     candidate_stops = current_stops[:pos] + [(load, pos)] + current_stops[pos:]
@@ -468,6 +496,7 @@ class RoutingEngine:
                     simulated = self._simulate_route(driver, candidate_stops)
                     if simulated is None:
                         failure_reasons.append("Shift time exceeded.")
+                        terminal_eligible_reasons.append("Shift time exceeded.")
                         continue
 
                     # Score: lower loaded-to-empty ratio = better (maximize loaded)
@@ -480,8 +509,10 @@ class RoutingEngine:
             if best_driver and best_route:
                 self.routes[best_driver.driver_id] = best_route
             else:
-                # Pick the highest priority failure reason
-                reasons = failure_reasons or ["No feasible assignment."]
+                # Prefer the most-informative reasons from drivers that passed terminal checks;
+                # fall back to the full list only if no terminal-eligible driver was tried.
+                reason_pool = terminal_eligible_reasons if terminal_eligible_reasons else failure_reasons
+                reasons = reason_pool or ["No feasible assignment."]
                 best_reason = min(reasons, key=reason_priority)
                 self.unassigned.append((load, best_reason, "unassigned"))
 
