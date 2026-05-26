@@ -42,6 +42,17 @@ function formatWindow(start?: string, end?: string): string {
   }
 }
 
+function isOverdue(windowEnd?: string): boolean {
+  if (!windowEnd) return false
+  try {
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    return parseISO(windowEnd) < todayStart
+  } catch {
+    return false
+  }
+}
+
 interface Props {
   load: LoadCardData
   isDragging?: boolean
@@ -129,11 +140,29 @@ export function LoadCard({ load, isDragging }: Props) {
           gap: '4px 8px',
           fontSize: '11px',
         }}>
-          <div>
-            <span style={{ color: 'var(--text-dim)' }}>Window: </span>
-            <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {formatWindow(load.window_start, load.window_end)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span>
+              <span style={{ color: 'var(--text-dim)' }}>Window: </span>
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {formatWindow(load.window_start, load.window_end)}
+              </span>
             </span>
+            {isOverdue(load.window_end) && (
+              <span style={{
+                fontSize: '9px',
+                fontWeight: 700,
+                fontFamily: 'var(--font-mono)',
+                color: '#f97316',
+                background: 'rgba(249,115,22,0.12)',
+                border: '1px solid rgba(249,115,22,0.35)',
+                borderRadius: '3px',
+                padding: '1px 5px',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+              }}>
+                OVERDUE
+              </span>
+            )}
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <span style={{ color: 'var(--text-dim)' }}>Term: </span>
