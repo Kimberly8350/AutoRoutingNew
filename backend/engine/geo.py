@@ -101,19 +101,33 @@ async def get_travel_mins(
     return haversine_travel_mins(lat1, lon1, lat2, lon2)
 
 
+# Per-process cache: (lat1, lon1, lat2, lon2) rounded to 3 dp → travel minutes.
+# Keyed without departure_epoch — close-enough for routing engine simulation loops
+# where the same yard→terminal or terminal→site leg is evaluated hundreds of times.
+_travel_cache: dict[tuple, float] = {}
+
+
 def get_travel_mins_sync(
     lat1: float, lon1: float,
     lat2: float, lon2: float,
     departure_epoch: Optional[int] = None,
 ) -> float:
-    """Synchronous wrapper for get_travel_mins."""
+    """Synchronous wrapper for get_travel_mins, with in-process cache."""
+    cache_key = (round(lat1, 3), round(lon1, 3), round(lat2, 3), round(lon2, 3))
+    if cache_key in _travel_cache:
+        return _travel_cache[cache_key]
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # If already in async context, use haversine only
-            return haversine_travel_mins(lat1, lon1, lat2, lon2)
-        return loop.run_until_complete(
-            get_travel_mins(lat1, lon1, lat2, lon2, departure_epoch)
-        )
+            # Inside async context (FastAPI handler) — use haversine only
+            result = haversine_travel_mins(lat1, lon1, lat2, lon2)
+        else:
+            result = loop.run_until_complete(
+                get_travel_mins(lat1, lon1, lat2, lon2, departure_epoch)
+            )
     except Exception:
-        return haversine_travel_mins(lat1, lon1, lat2, lon2)
+        result = haversine_travel_mins(lat1, lon1, lat2, lon2)
+
+    _travel_cache[cache_key] = result
+    return result
