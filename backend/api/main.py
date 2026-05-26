@@ -129,7 +129,6 @@ def health():
 @app.post("/api/dispatch/run")
 async def run_dispatch(
     req: DispatchRequest,
-    background_tasks: BackgroundTasks,
     user=Depends(verify_token),
 ):
     """Run the routing engine for a given date."""
@@ -182,8 +181,8 @@ async def run_dispatch(
         log.exception(f"run_dispatch engine error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Persist results to Supabase in background
-    background_tasks.add_task(persist_dispatch_result, client, result, user)
+    # Persist synchronously so the board is ready when the frontend calls fetchBoard
+    persist_dispatch_result(client, result, user)
 
     return {
         "run_id": result.run_id,
