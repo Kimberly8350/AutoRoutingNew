@@ -181,8 +181,8 @@ async def run_dispatch(
         log.exception(f"run_dispatch engine error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Persist synchronously so the board is ready when the frontend calls fetchBoard
-    persist_dispatch_result(client, result, user)
+    # Await persist so results are in Supabase before the frontend fetches the board
+    await persist_dispatch_result(client, result, user)
 
     return {
         "run_id": result.run_id,
