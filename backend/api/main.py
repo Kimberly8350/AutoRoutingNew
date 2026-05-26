@@ -576,6 +576,15 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         .data
     )
 
+    # Remove permanently inactive drivers from the board
+    try:
+        inactive_rows = client.table("driver_inactive").select("driver_id").execute().data
+        inactive_ids = {r["driver_id"] for r in inactive_rows}
+        if inactive_ids:
+            driver_rows = [r for r in driver_rows if r.get("driver_id") not in inactive_ids]
+    except Exception:
+        pass
+
     scheduled_driver_ids = {r["driver_id"] for r in driver_rows}
 
     # Strip dispatch_results for drivers not on today's schedule so stale
