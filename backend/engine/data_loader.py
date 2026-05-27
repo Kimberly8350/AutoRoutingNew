@@ -107,6 +107,7 @@ def load_sites(client: Client) -> dict[int, Site]:
                 city=r.get("city") or "",
                 state=r.get("state") or "",
                 pump_certified=int(r.get("pump_certified") or 0),
+                alternate_terminal_ids=r.get("alternate_terminal_ids") or [],
             )
     log.info(f"Loaded {len(sites)} sites")
     return sites

@@ -6,7 +6,7 @@ Greedy assignment engine with all dispatch logic per spec.
 import uuid
 import logging
 import time as time_mod
-from copy import deepcopy
+from copy import deepcopy, copy
 from datetime import datetime, timedelta, date
 from typing import Optional
 
@@ -102,15 +102,34 @@ class RoutingEngine:
 
     # ---- eligibility checks ----
 
+    def _get_viable_terminal(self, driver: Driver, load: Load) -> Optional["Terminal"]:
+        """Return the terminal to use for this driver/load pair.
+        Tries the primary terminal first, then any alternates defined on the site.
+        Returns None if no accessible, resolved terminal is found.
+        """
+        # Primary terminal — driver has access and terminal object is resolved
+        if load.terminal_id and load.terminal_id in driver.terminal_ids and load.terminal:
+            return load.terminal
+        # Alternate terminals from site (e.g. GPM interchangeable rack group)
+        if load.site and load.site.alternate_terminal_ids:
+            for alt_tid in load.site.alternate_terminal_ids:
+                if alt_tid == load.terminal_id:
+                    continue  # already tried above
+                if alt_tid in driver.terminal_ids:
+                    alt_terminal = self.terminals.get(alt_tid)
+                    if alt_terminal:
+                        return alt_terminal
+        return None
+
     def _check_driver_eligible(self, driver: Driver, load: Load) -> Optional[str]:
-        """Return failure reason string or None if eligible."""
-        # Pump certification
+        """Return failure reason string or None if eligible.
+        Terminal access is NOT checked here — handled separately via _get_viable_terminal
+        so that alternate terminals are considered before rejecting the driver.
+        """
         site = load.site
+        # Pump certification
         if site and site.pump_certified and not driver.pump_trained:
             return "No feasible assignment: Pump certification required."
-        # Terminal access — terminal_id=0 means unknown, treat as no access
-        if not load.terminal_id or load.terminal_id not in driver.terminal_ids:
-            return "No eligible terminal: Driver has no terminal access."
         # Site restriction
         if site and site.site_id in driver.restricted_site_ids:
             return "No feasible assignment: Driver restricted from this site."
@@ -442,12 +461,17 @@ class RoutingEngine:
             if not load.site:
                 self.unassigned.append((load, "No feasible assignment: Site location unavailable.", "site"))
                 continue
-            if not load.terminal:
-                self.unassigned.append((load, "No eligible terminal: Terminal location unavailable.", "terminal"))
-                continue
             if not load.site.latitude or not load.site.longitude:
                 self.unassigned.append((load, "No feasible assignment: Site location unavailable.", "site"))
                 continue
+            if not load.terminal:
+                # Allow through if the site has alternate terminals that are resolved
+                has_alternates = any(
+                    self.terminals.get(t) for t in (load.site.alternate_terminal_ids or [])
+                )
+                if not has_alternates:
+                    self.unassigned.append((load, "No eligible terminal: Terminal location unavailable.", "terminal"))
+                    continue
             valid_loads.append(load)
 
         sorted_loads = self._sort_loads(valid_loads)
@@ -481,13 +505,20 @@ class RoutingEngine:
             )
 
             for driver in sorted_drivers:
-                # Hard static checks
+                # Resolve terminal — try primary first, then site alternates
+                viable_terminal = self._get_viable_terminal(driver, load)
+                if not viable_terminal:
+                    if not driver.terminal_ids:
+                        failure_reasons.append("No eligible terminal: Driver has no terminal access.")
+                    else:
+                        failure_reasons.append("No eligible terminal: Driver restricted from this terminal.")
+                    continue
+
+                # Hard static checks (terminal access already resolved above)
                 elig_fail = self._check_driver_eligible(driver, load)
                 if elig_fail:
                     failure_reasons.append(elig_fail)
-                    # Only track reasons from drivers who passed terminal access
-                    if "terminal" not in elig_fail.lower():
-                        terminal_eligible_reasons.append(elig_fail)
+                    terminal_eligible_reasons.append(elig_fail)
                     continue
 
                 if not driver.yard_location:
@@ -507,16 +538,29 @@ class RoutingEngine:
                         for s in current_route.stops
                     ]
 
+                # If routing via an alternate terminal, use a shallow copy of the load
+                # so the simulation uses the correct terminal without mutating the original.
+                if viable_terminal.terminal_id != (load.terminal_id or ""):
+                    working_load = copy(load)
+                    working_load.terminal = viable_terminal
+                    working_load.terminal_id = viable_terminal.terminal_id
+                    log.debug(
+                        f"ce_id={load.ce_id}: using alternate terminal "
+                        f"{viable_terminal.terminal_id} for driver {driver.driver_id}"
+                    )
+                else:
+                    working_load = load
+
                 # Try inserting this load at each position
                 insert_positions = list(range(len(current_stops) + 1))
                 for pos in insert_positions:
-                    diesel_wet_fail = self._check_diesel_wet_sequence(driver, load, pos)
+                    diesel_wet_fail = self._check_diesel_wet_sequence(driver, working_load, pos)
                     if diesel_wet_fail:
                         failure_reasons.append(diesel_wet_fail)
                         terminal_eligible_reasons.append(diesel_wet_fail)
                         continue
 
-                    candidate_stops = current_stops[:pos] + [(load, pos)] + current_stops[pos:]
+                    candidate_stops = current_stops[:pos] + [(working_load, pos)] + current_stops[pos:]
                     candidate_stops = [(l, i) for i, (l, _) in enumerate(candidate_stops)]
 
                     simulated = self._simulate_route(driver, candidate_stops)

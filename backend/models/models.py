@@ -41,6 +41,7 @@ class Site:
     city: str = ""
     state: str = ""
     pump_certified: int = 0
+    alternate_terminal_ids: list = field(default_factory=list)  # interchangeable terminal IDs
 
 
 @dataclass
