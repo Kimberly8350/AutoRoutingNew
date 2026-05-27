@@ -65,8 +65,8 @@ export function LoadCard({ load, isDragging }: Props) {
     <div style={{
       background: isDragging ? 'var(--surface-overlay)' : status.bg,
       border: `1px solid ${isDragging ? 'var(--accent)' : status.border}`,
-      borderRadius: '6px',
-      padding: '10px 12px',
+      borderRadius: '5px',
+      padding: '6px 10px',
       cursor: 'grab',
       userSelect: 'none',
       opacity: isDragging ? 0.9 : 1,
@@ -77,134 +77,124 @@ export function LoadCard({ load, isDragging }: Props) {
       {/* Status dot */}
       <div style={{
         position: 'absolute',
-        top: '10px',
-        right: '10px',
-        width: '7px',
-        height: '7px',
+        top: '8px',
+        right: '8px',
+        width: '6px',
+        height: '6px',
         borderRadius: '50%',
         background: status.dot,
-        boxShadow: `0 0 6px ${status.dot}`,
+        boxShadow: `0 0 5px ${status.dot}`,
       }} />
 
       {/* Sequence badge */}
       {load.sequence !== undefined && (
         <div style={{
           position: 'absolute',
-          top: '8px',
+          top: '6px',
           left: '-1px',
           background: 'var(--accent)',
           color: 'white',
-          fontSize: '10px',
+          fontSize: '9px',
           fontWeight: 700,
           fontFamily: 'var(--font-mono)',
-          padding: '1px 6px',
+          padding: '1px 5px',
           borderRadius: '0 3px 3px 0',
         }}>
           {load.sequence + 1}
         </div>
       )}
 
-      <div style={{ paddingTop: load.sequence !== undefined ? '4px' : '0' }}>
-        {/* Customer */}
+      <div style={{ paddingTop: load.sequence !== undefined ? '3px' : '0' }}>
+        {/* Customer · City on one line */}
         <div style={{
-          fontSize: '11px',
-          color: 'var(--text-muted)',
+          fontSize: '10px',
+          color: 'var(--text-dim)',
           fontFamily: 'var(--font-mono)',
-          marginBottom: '2px',
+          marginBottom: '1px',
           textTransform: 'uppercase',
-          letterSpacing: '0.05em',
+          letterSpacing: '0.04em',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          paddingRight: '14px',
         }}>
-          {load.customer_name}
+          {load.customer_name}{load.site_city ? ` · ${load.site_city}` : ''}
         </div>
 
         {/* Site name */}
         <div style={{
-          fontSize: '13px',
+          fontSize: '12px',
           fontWeight: 600,
           color: 'var(--text)',
-          marginBottom: '1px',
-          lineHeight: 1.3,
+          marginBottom: '4px',
+          lineHeight: 1.2,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          paddingRight: '14px',
         }}>
           {load.site_name}
         </div>
 
-        {/* City */}
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-          {load.site_city}
-        </div>
-
-        {/* Details grid */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '4px 8px',
-          fontSize: '11px',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <span>
-              <span style={{ color: 'var(--text-dim)' }}>Window: </span>
-              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                {formatWindow(load.window_start, load.window_end)}
-              </span>
+        {/* Row: Window + OVERDUE + ETA */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', marginBottom: '2px', flexWrap: 'wrap' }}>
+          <span>
+            <span style={{ color: 'var(--text-dim)' }}>Win: </span>
+            <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {formatWindow(load.window_start, load.window_end)}
             </span>
-            {isOverdue(load.window_end) && (
-              <span style={{
-                fontSize: '9px',
-                fontWeight: 700,
-                fontFamily: 'var(--font-mono)',
-                color: '#f97316',
-                background: 'rgba(249,115,22,0.12)',
-                border: '1px solid rgba(249,115,22,0.35)',
-                borderRadius: '3px',
-                padding: '1px 5px',
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-              }}>
-                OVERDUE
-              </span>
-            )}
-          </div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <span style={{ color: 'var(--text-dim)' }}>Term: </span>
-            <span style={{ color: 'var(--text-muted)' }}>{load.terminal_name || '—'}</span>
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)' }}>Product: </span>
-            <span style={{ color: 'var(--text-muted)' }}>{load.product_name}</span>
-          </div>
+          </span>
+          {isOverdue(load.window_end) && (
+            <span style={{
+              fontSize: '8px',
+              fontWeight: 700,
+              fontFamily: 'var(--font-mono)',
+              color: '#f97316',
+              background: 'rgba(249,115,22,0.12)',
+              border: '1px solid rgba(249,115,22,0.35)',
+              borderRadius: '3px',
+              padding: '1px 4px',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}>
+              OVERDUE
+            </span>
+          )}
           {load.eta && (
-            <div>
+            <span style={{ marginLeft: 'auto' }}>
               <span style={{ color: 'var(--text-dim)' }}>ETA: </span>
               <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                 {format(parseISO(load.eta), 'HH:mm')}
               </span>
-            </div>
+            </span>
           )}
+        </div>
+
+        {/* Row: Terminal · Product */}
+        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span style={{ color: 'var(--text-dim)' }}>Term: </span>{load.terminal_name || '—'}
+          <span style={{ color: 'var(--text-dim)', margin: '0 4px' }}>·</span>
+          <span style={{ color: 'var(--text-dim)' }}>Prod: </span>{load.product_name || '—'}
         </div>
 
         {/* Bottom row */}
         <div style={{
-          marginTop: '8px',
-          paddingTop: '8px',
-          borderTop: '1px solid rgba(255,255,255,0.06)',
+          paddingTop: '4px',
+          borderTop: '1px solid rgba(255,255,255,0.05)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
         }}>
-          <span style={{
-            fontSize: '10px',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--text-dim)',
-          }}>
+          <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
             CE#{load.ce_id}{load.order_number ? ` · #${load.order_number}` : ''}
           </span>
           <span style={{
-            fontSize: '10px',
+            fontSize: '9px',
             fontWeight: 600,
             color: status.dot,
             fontFamily: 'var(--font-mono)',
             textTransform: 'uppercase',
-            letterSpacing: '0.05em',
+            letterSpacing: '0.04em',
           }}>
             {status.label}
           </span>
