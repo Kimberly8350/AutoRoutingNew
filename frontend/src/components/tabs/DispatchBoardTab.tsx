@@ -130,12 +130,14 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
     }
 
     // --- Step 4: Sort loads within each driver column ---
+    // Order: Delivered → En Route/At Site → En Route/At Rack → Planned/Assigned → other
     function paStatusGroup(load: any): number {
       const s = Number(load.load_status ?? 0)
-      if (s === 26) return 0
-      if (s === 22 || s === 24) return 1
-      if (s === 10) return 2
-      return 3
+      if (s === 26) return 0            // Delivered — done, comes first
+      if (s === 22 || s === 24) return 1 // En Route to Site / At Site — delivering now
+      if (s === 12 || s === 20) return 2 // En Route to Rack / At Rack — picking up now
+      if (s === 10 || s === 2) return 3  // Assigned / Planned — future stops
+      return 4
     }
     function paSortTime(load: any): string {
       const s = Number(load.load_status ?? 0)
