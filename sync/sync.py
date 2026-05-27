@@ -110,6 +110,8 @@ def fetch_loads_from_mysql() -> pd.DataFrame:
             LEFT JOIN dl_drivers         drv  ON drv.driver_id       = rt.driver_id
             WHERE od.drop_schedule_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
               AND od.drop_status_id != 0
+              AND dest.destination_name IS NOT NULL
+              AND od.location_id IS NOT NULL
         """
         with conn.cursor() as cur:
             cur.execute(query)
