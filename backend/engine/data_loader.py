@@ -232,10 +232,9 @@ def load_loads_for_date(
     client: Client,
     dispatch_date: date,
 ) -> list[Load]:
-    """Load all loads within ±1 day of dispatch_date."""
+    """Load all loads for dispatch_date and +1 day (tomorrow's orders)."""
     from datetime import timedelta
     dates = [
-        (dispatch_date - timedelta(days=1)).isoformat(),
         dispatch_date.isoformat(),
         (dispatch_date + timedelta(days=1)).isoformat(),
     ]

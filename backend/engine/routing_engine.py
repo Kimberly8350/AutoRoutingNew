@@ -37,7 +37,7 @@ SAME_TERMINAL_SWAP_STATUS = {STATUS_EN_ROUTE_RACK}
 # Delivery window tolerance
 EARLY_ALLOWANCE_MINS = 120  # 2 hours early
 LATE_ALLOWANCE_MINS = 60    # 1 hour late
-REJECT_LATE_MINS = 60       # reject if more than 1 hour late
+REJECT_LATE_MINS = 240      # reject if more than 4 hours late
 
 # Priority for unassigned reason display
 REASON_PRIORITY = [
@@ -390,7 +390,7 @@ class RoutingEngine:
             route = self.routes[driver.driver_id]
 
             for load in locked_loads:
-                if len(route.stops) >= 4:
+                if len(route.stops) >= 5:
                     break
                 current_stops = [(self._find_load_by_ce(s.ce_id), s.sequence) for s in route.stops]
                 current_stops.append((load, len(current_stops)))
@@ -432,7 +432,7 @@ class RoutingEngine:
         today = self.dispatch_date
         eligible_loads = [
             l for l in self.loads
-            if l.delivery_date and abs((date.fromisoformat(l.delivery_date) - today).days) <= 1
+            if l.delivery_date and 0 <= (date.fromisoformat(l.delivery_date) - today).days <= 1
             and (l.load_status == 1)  # only route unscheduled; 0=deleted, >1=in progress
         ]
 
@@ -498,7 +498,7 @@ class RoutingEngine:
                 current_route = self.routes.get(driver.driver_id)
                 current_stops = []
                 if current_route:
-                    if len(current_route.stops) >= 4:
+                    if len(current_route.stops) >= 5:
                         failure_reasons.append("Shift time exceeded.")
                         terminal_eligible_reasons.append("Shift time exceeded.")
                         continue

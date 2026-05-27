@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 TRAVEL_SPEED_MPH = 50  # fallback if Maps API unavailable
-LOAD_SERVICE_MINS = 30
+LOAD_SERVICE_MINS = 45
 UNLOAD_SERVICE_MINS = 45
 
 
