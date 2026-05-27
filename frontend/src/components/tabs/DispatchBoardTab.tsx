@@ -574,7 +574,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
       </div>
 
       {/* Board */}
-      <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: '16px 20px' }}>
+      <div style={{ flex: 1, overflowX: 'auto', overflowY: 'auto', padding: '16px 20px' }}>
         {loading ? (
           <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', padding: '20px' }}>
             Loading dispatch board...
@@ -589,8 +589,8 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
             <div style={{
               display: 'flex',
               gap: '12px',
-              height: 'calc(100vh - 260px)',
               minWidth: 'max-content',
+              alignItems: 'flex-start',
             }}>
               {currentBoard.map(col => {
                 const filteredLoads = col.loads.filter(filterLoad)
@@ -645,8 +645,6 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
 
                     {/* Load list */}
                     <div style={{
-                      flex: 1,
-                      overflowY: 'auto',
                       padding: '8px',
                       display: 'flex',
                       flexDirection: 'column',
