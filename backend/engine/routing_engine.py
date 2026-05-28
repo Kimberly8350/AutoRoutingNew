@@ -352,19 +352,26 @@ class RoutingEngine:
         in-progress loads always appear on the correct driver regardless of
         whether this is a fresh dispatch or a reroute.
 
-        Only seeds loads for the current dispatch_date — adjacent-day loads
-        (from the ±1 day data window) must NOT be seeded, otherwise yesterday's
-        delivered loads would fill driver capacity before today's dispatch begins.
-
-        Additionally, loads whose window/eta predates the driver's shift start are
-        from a previous dispatch board (e.g. a PM driver's 05/26 overnight loads
-        carrying delivery_date=05/27) and must not consume capacity on today's board.
+        Seeding rules:
+        - Same-day loads (delivery_date == dispatch_date): seed unless the load's
+          window/eta predates the driver's shift start (i.e. it belongs to a
+          previous shift earlier the same calendar day).
+        - Next-day loads (delivery_date == dispatch_date + 1): seed ONLY for
+          overnight drivers (start_time >= 20:00) whose shift spans midnight.
+        - All other dates: skip.
         """
         dispatch_date_str = str(self.dispatch_date)
+        next_date_str = (self.dispatch_date + timedelta(days=1)).isoformat()
         dispatch_day_start = datetime(
             self.dispatch_date.year, self.dispatch_date.month, self.dispatch_date.day
         )
         driver_lookup = {d.driver_id: d for d in self.drivers}
+
+        # Overnight drivers whose shift spans midnight (start >= 20:00)
+        overnight_driver_ids = {
+            d.driver_id for d in self.drivers
+            if d.start_time and d.start_time.hour >= 20
+        }
 
         # Group locked loads by driver
         driver_locked: dict[int, list[Load]] = {}
@@ -373,26 +380,32 @@ class RoutingEngine:
                 continue
             if not load.assigned_driver_id:
                 continue
-            # Exclude adjacent-day loads — only seed today's locked loads
-            if load.delivery_date and load.delivery_date[:10] != dispatch_date_str:
-                continue
-            # Exclude loads that belong to a previous dispatch board.
-            # If a load's window_start (or delivery_eta fallback) predates this
-            # driver's shift start on dispatch_date, it was dispatched on an earlier
-            # board (e.g. previous evening's PM run) and must not count against today.
-            driver = driver_lookup.get(load.assigned_driver_id)
-            if driver and driver.start_time:
-                driver_shift_start = dispatch_day_start.replace(
-                    hour=driver.start_time.hour,
-                    minute=driver.start_time.minute,
-                )
-                load_time = load.window_start or load.delivery_eta
-                if load_time is not None and load_time < driver_shift_start:
-                    log.debug(
-                        f"Skipping seed ce_id={load.ce_id}: load time {load_time} "
-                        f"predates driver {load.assigned_driver_id} shift start {driver_shift_start}"
+
+            load_date = load.delivery_date[:10] if load.delivery_date else ""
+
+            if load_date == dispatch_date_str:
+                # Same-day load: skip if window predates this driver's shift start
+                # (would belong to an earlier AM shift on the same calendar day).
+                driver = driver_lookup.get(load.assigned_driver_id)
+                if driver and driver.start_time:
+                    driver_shift_start = dispatch_day_start.replace(
+                        hour=driver.start_time.hour,
+                        minute=driver.start_time.minute,
                     )
+                    load_time = load.window_start or load.delivery_eta
+                    if load_time is not None and load_time < driver_shift_start:
+                        log.debug(
+                            f"Skipping seed ce_id={load.ce_id}: load time {load_time} "
+                            f"predates driver {load.assigned_driver_id} shift start {driver_shift_start}"
+                        )
+                        continue
+            elif load_date == next_date_str:
+                # Next-day load: only seed for overnight drivers
+                if load.assigned_driver_id not in overnight_driver_ids:
                     continue
+            else:
+                continue  # outside the relevant date window
+
             driver_locked.setdefault(load.assigned_driver_id, []).append(load)
 
         for driver_id, locked_loads in driver_locked.items():
@@ -409,7 +422,11 @@ class RoutingEngine:
             route = self.routes[driver.driver_id]
 
             for load in locked_loads:
-                if len(route.stops) >= 5:
+                # Capacity: total committed = max(seeded so far, CE pre-assigned count)
+                # Using max() avoids double-counting loads that are both seeded and in
+                # the pre_assigned_count.
+                total_committed = max(len(route.stops), driver.pre_assigned_count)
+                if total_committed >= 5:
                     break
                 current_stops = [(self._find_load_by_ce(s.ce_id), s.sequence) for s in route.stops]
                 current_stops.append((load, len(current_stops)))
@@ -552,11 +569,15 @@ class RoutingEngine:
 
                 current_route = self.routes.get(driver.driver_id)
                 current_stops = []
+                seeded = len(current_route.stops) if current_route else 0
+                # Total committed = max(seeded by engine, CE pre-assigned count).
+                # max() prevents double-counting loads that appear in both.
+                total_committed = max(seeded, driver.pre_assigned_count)
+                if total_committed >= 5:
+                    failure_reasons.append("Shift time exceeded.")
+                    terminal_eligible_reasons.append("Shift time exceeded.")
+                    continue
                 if current_route:
-                    if len(current_route.stops) >= 5:
-                        failure_reasons.append("Shift time exceeded.")
-                        terminal_eligible_reasons.append("Shift time exceeded.")
-                        continue
                     current_stops = [
                         (self._find_load_by_ce(s.ce_id), s.sequence)
                         for s in current_route.stops

@@ -62,6 +62,9 @@ class Driver:
     # clock events from CE Connect (populated by data loader)
     route_start_time: Optional[datetime] = None
     route_finish_time: Optional[datetime] = None
+    # CE-assigned loads already committed to this driver (status > 1).
+    # Set by data_loader so the routing engine can budget remaining capacity.
+    pre_assigned_count: int = 0
 
     @property
     def full_name(self) -> str:

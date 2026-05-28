@@ -157,6 +157,37 @@ def load_driver_restrictions(client: Client) -> dict[int, dict]:
     return restrictions
 
 
+def load_pre_assigned_counts(client: Client, dispatch_date: date) -> dict[str, int]:
+    """Count CE-committed loads (status > 1) per driver name for capacity budgeting.
+
+    Covers dispatch_date + next day so overnight drivers' next-day CE assignments
+    are included in their capacity budget.  Keyed by lowercase 'first last' name.
+    """
+    from datetime import timedelta
+    dates = [dispatch_date.isoformat(), (dispatch_date + timedelta(days=1)).isoformat()]
+    counts: dict[str, int] = {}
+    for d in dates:
+        try:
+            rows = (
+                client.table("load_details")
+                .select("first_name,last_name")
+                .eq("delivery_date", d)
+                .gt("load_status", 1)
+                .not_.is_("first_name", "null")
+                .execute()
+                .data
+            )
+            for r in rows:
+                fn = (r.get("first_name") or "").strip()
+                ln = (r.get("last_name") or "").strip()
+                if fn or ln:
+                    key = f"{fn} {ln}".strip().lower()
+                    counts[key] = counts.get(key, 0) + 1
+        except Exception as e:
+            log.warning(f"Could not load pre-assigned counts for {d}: {e}")
+    return counts
+
+
 def load_driver_clock_events(client: Client, dispatch_date: date) -> dict[int, dict]:
     """Returns {driver_id: {route_start_time, route_finish_time}} for the given shift date."""
     try:
@@ -203,6 +234,7 @@ def load_drivers_for_date(
     terminal_access = load_driver_terminal_access(client)
     restrictions = load_driver_restrictions(client)
     clock_events = load_driver_clock_events(client, dispatch_date)
+    pre_assigned_counts = load_pre_assigned_counts(client, dispatch_date)
 
     drivers = []
     seen = set()
@@ -249,6 +281,10 @@ def load_drivers_for_date(
         clk = clock_events.get(int(did), {})
         driver.route_start_time = clk.get("route_start_time")
         driver.route_finish_time = clk.get("route_finish_time")
+
+        # Count CE-committed loads so the engine knows how many slots are already taken
+        name_key = f"{driver.first_name} {driver.last_name}".strip().lower()
+        driver.pre_assigned_count = pre_assigned_counts.get(name_key, 0)
 
         drivers.append(driver)
 
