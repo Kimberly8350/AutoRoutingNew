@@ -515,18 +515,18 @@ def sync_driver_clock_events_from_mysql(client: Client) -> dict:
             cursorclass=pymysql.cursors.DictCursor,
         )
         try:
-            # NOTE: Verify column names match your vw_driver_details_feed view.
-            # Expected: driver_id, route_start_time, route_finish_time
-            # shift_date is derived from DATE(route_start_time) — the board date
-            # the driver is associated with (overnight drivers keep their board date).
+            # Query dlb_routes directly — QWReporting has access to this table
+            # (same source used in the loads query). shift_date is the board date
+            # derived from route_start_time so overnight drivers map to their start day.
             query = """
                 SELECT
                     driver_id,
                     DATE(route_start_time)   AS shift_date,
                     route_start_time,
                     route_finish_time
-                FROM vw_driver_details_feed
+                FROM dlb_routes
                 WHERE route_start_time >= DATE_SUB(CURDATE(), INTERVAL 2 DAY)
+                  AND driver_id IS NOT NULL
             """
             with conn.cursor() as cur:
                 cur.execute(query)
