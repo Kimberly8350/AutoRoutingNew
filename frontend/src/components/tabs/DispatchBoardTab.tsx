@@ -492,7 +492,24 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
               }}>
                 {alert.type === 'not_started' ? 'NOT STARTED' : 'DELAYED'}
               </span>
-              <span style={{ color: 'var(--text-muted)' }}>{alert.message}</span>
+              <span style={{ color: 'var(--text-muted)', flex: 1 }}>{alert.message}</span>
+              <button
+                onClick={() => setAlerts(prev => prev.filter(
+                  (a: any) => !(a.driver_id === alert.driver_id && a.type === alert.type)
+                ))}
+                title="Dismiss alert"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  lineHeight: 1,
+                  padding: '0 2px',
+                  borderRadius: '3px',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >×</button>
             </div>
           ))}
         </div>
