@@ -755,11 +755,17 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         return rows
 
     pre_assigned_loads = _fetch_pre_assigned(dispatch_date)
+    # Tag each row so we can filter by origin date later in the building loop.
+    for r in pre_assigned_loads:
+        r["_board_date"] = dispatch_date
+
     if overnight_driver_ids:
         # Include prev-date active loads for overnight drivers, but drop DELIVERED
         # (status 26) — completed work from the previous calendar day doesn't belong
         # on the next day's board and only clutters the dispatcher's view.
         prev_pa = _fetch_pre_assigned(prev_date)
+        for r in prev_pa:
+            r["_board_date"] = prev_date
         pre_assigned_loads += [
             r for r in prev_pa
             if int(r.get("load_status") or 0) != 26
@@ -788,6 +794,11 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         lname = (load.get("last_name") or "").strip()
         driver = driver_name_map.get(f"{fname} {lname}".lower())
         if not driver:
+            continue
+        # Prev-date loads must only appear on overnight driver columns.
+        # A regular driver (e.g. Juan, starts 04:30) who is also scheduled the
+        # following day must NOT inherit his prev-day CE loads on that next board.
+        if load.get("_board_date") == prev_date and driver["driver_id"] not in overnight_driver_ids:
             continue
         status = int(load.get("load_status") or 0)
         display_eta = (
