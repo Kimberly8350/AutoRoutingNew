@@ -506,6 +506,94 @@ def remove_restriction(restriction_id: int, user=Depends(verify_token)):
     return {"status": "ok"}
 
 
+# ---- Dispatch Alerts ----
+@app.get("/api/dispatch/alerts")
+def get_dispatch_alerts(dispatch_date: str, user=Depends(verify_token)):
+    """Return active driver alerts for the given dispatch date.
+    Only generates alerts when viewing today's board."""
+    from datetime import datetime as dt
+    client = get_supabase()
+
+    today = date.today().isoformat()
+    if dispatch_date != today:
+        return {"alerts": [], "as_of": dt.now().isoformat()}
+
+    now = dt.now()
+
+    driver_rows = (
+        client.table("driver_schedules")
+        .select("driver_id,first_name,last_name,driver_start_time")
+        .eq("shift_date", dispatch_date)
+        .eq("attendance_expected", 1)
+        .execute()
+        .data
+    )
+
+    try:
+        inactive_rows = client.table("driver_inactive").select("driver_id").execute().data
+        inactive_ids = {r["driver_id"] for r in inactive_rows}
+        driver_rows = [r for r in driver_rows if r.get("driver_id") not in inactive_ids]
+    except Exception:
+        pass
+
+    clock_rows = (
+        client.table("driver_clock_events")
+        .select("driver_id,route_start_time,route_finish_time")
+        .eq("shift_date", dispatch_date)
+        .execute()
+        .data
+    )
+    clock_map = {r["driver_id"]: r for r in clock_rows}
+
+    alerts = []
+    for driver in driver_rows:
+        did = driver.get("driver_id")
+        name = f"{driver.get('first_name') or ''} {driver.get('last_name') or ''}".strip()
+        start_str = driver.get("driver_start_time") or ""
+        if not start_str or ":" not in start_str:
+            continue
+        try:
+            parts = start_str.split(":")
+            scheduled_start = dt(now.year, now.month, now.day, int(parts[0]), int(parts[1]))
+        except Exception:
+            continue
+
+        mins_since_scheduled = (now - scheduled_start).total_seconds() / 60
+        if mins_since_scheduled < 0:
+            continue  # shift hasn't started yet
+
+        clk = clock_map.get(did, {})
+        route_start_raw = clk.get("route_start_time")
+
+        if route_start_raw:
+            # Driver has clocked in — check for delayed start (≥45 min late)
+            try:
+                actual_start = dt.fromisoformat(str(route_start_raw).replace("Z", ""))
+                delay_mins = (actual_start - scheduled_start).total_seconds() / 60
+                if delay_mins >= 45:
+                    alerts.append({
+                        "driver_id": did,
+                        "driver_name": name,
+                        "type": "delayed_start",
+                        "message": f"{name} has a delayed start. Reroute may be necessary.",
+                        "delay_mins": int(delay_mins),
+                    })
+            except Exception:
+                pass
+        else:
+            # Driver has not clocked in — alert if ≥46 min past scheduled start
+            if mins_since_scheduled >= 46:
+                alerts.append({
+                    "driver_id": did,
+                    "driver_name": name,
+                    "type": "not_started",
+                    "message": f"{name} has not started their shift. Confirm attendance and start time.",
+                    "mins_overdue": int(mins_since_scheduled),
+                })
+
+    return {"alerts": alerts, "as_of": now.isoformat()}
+
+
 # ---- Dispatch Board ----
 @app.get("/api/dispatch")
 def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
@@ -665,6 +753,25 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             "completed_delivery_time": load.get("completed_delivery_time"),
             "pre_assigned": True,
         })
+
+    # Load clock events for this date and attach to driver rows
+    try:
+        clock_rows = (
+            client.table("driver_clock_events")
+            .select("driver_id,route_start_time,route_finish_time")
+            .eq("shift_date", dispatch_date)
+            .execute()
+            .data
+        )
+        clock_map = {r["driver_id"]: r for r in clock_rows}
+        for dr in driver_rows:
+            clk = clock_map.get(dr.get("driver_id"), {})
+            dr["route_start_time"] = clk.get("route_start_time")
+            dr["route_finish_time"] = clk.get("route_finish_time")
+    except Exception:
+        for dr in driver_rows:
+            dr["route_start_time"] = None
+            dr["route_finish_time"] = None
 
     return {
         "dispatch_results": results,

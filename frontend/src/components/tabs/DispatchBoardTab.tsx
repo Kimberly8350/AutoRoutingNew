@@ -41,6 +41,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [history, setHistory] = useState<any[]>([])  // for undo
   const [activeBoard, setActiveBoard] = useState('TX-AM')
+  const [alerts, setAlerts] = useState<any[]>([])
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -58,6 +59,22 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
   }, [selectedDate])
 
   useEffect(() => { fetchBoard() }, [fetchBoard])
+
+  // Poll for driver alerts every 2 minutes
+  useEffect(() => {
+    if (!selectedDate) return
+    async function fetchAlerts() {
+      try {
+        const data = await api.getAlerts(selectedDate)
+        setAlerts(data.alerts || [])
+      } catch {
+        // non-critical — don't surface alert fetch errors
+      }
+    }
+    fetchAlerts()
+    const interval = setInterval(fetchAlerts, 120000)
+    return () => clearInterval(interval)
+  }, [selectedDate])
 
   function buildBoards(data: any) {
     const { dispatch_results, pre_assigned, unassigned: ua, loads, driver_schedules } = data
@@ -444,6 +461,43 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
         </div>
       )}
 
+      {/* Driver alerts banner */}
+      {alerts.length > 0 && (
+        <div style={{
+          padding: '8px 20px',
+          background: 'rgba(234,179,8,0.08)',
+          borderBottom: '1px solid rgba(234,179,8,0.25)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
+        }}>
+          {alerts.map((alert: any) => (
+            <div key={`${alert.driver_id}-${alert.type}`} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '12px',
+            }}>
+              <span style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                padding: '1px 6px',
+                borderRadius: '3px',
+                fontFamily: 'var(--font-mono)',
+                background: alert.type === 'not_started' ? 'rgba(239,68,68,0.15)' : 'rgba(234,179,8,0.15)',
+                color: alert.type === 'not_started' ? '#f87171' : '#eab308',
+                border: `1px solid ${alert.type === 'not_started' ? 'rgba(239,68,68,0.35)' : 'rgba(234,179,8,0.35)'}`,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+              }}>
+                {alert.type === 'not_started' ? 'NOT STARTED' : 'DELAYED'}
+              </span>
+              <span style={{ color: 'var(--text-muted)' }}>{alert.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Assigned loads list panel */}
       {showAssigned && (
         <div style={{
@@ -641,6 +695,42 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
                               </span>
                             )}
                           </div>
+                          {/* Clock in/out times */}
+                          {(sched.route_start_time || sched.route_finish_time) && (
+                            <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              {sched.route_start_time && (
+                                <span style={{ color: '#16a34a' }}>
+                                  IN: {sched.route_start_time.slice(11, 16)}
+                                </span>
+                              )}
+                              {sched.route_finish_time && (
+                                <span style={{ color: '#6b7280' }}>
+                                  OUT: {sched.route_finish_time.slice(11, 16)}
+                                </span>
+                              )}
+                              {sched.route_finish_time && (
+                                <span style={{
+                                  fontSize: '9px', fontWeight: 700, padding: '1px 5px',
+                                  borderRadius: '3px', textTransform: 'uppercase', letterSpacing: '0.04em',
+                                  background: 'rgba(13,148,136,0.12)', color: '#0d9488',
+                                  border: '1px solid rgba(13,148,136,0.3)',
+                                }}>DONE</span>
+                              )}
+                              {/* Driver alert badge on column header */}
+                              {alerts.some((a: any) => a.driver_id === col.driver_id && a.type === 'not_started') && (
+                                <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>!</span>
+                              )}
+                              {alerts.some((a: any) => a.driver_id === col.driver_id && a.type === 'delayed_start') && (
+                                <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', background: 'rgba(234,179,8,0.15)', color: '#eab308', border: '1px solid rgba(234,179,8,0.3)' }}>LATE</span>
+                              )}
+                            </div>
+                          )}
+                          {/* Alert badge even when no clock data yet */}
+                          {!sched.route_start_time && !sched.route_finish_time && alerts.some((a: any) => a.driver_id === col.driver_id) && (
+                            <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
+                              <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>NOT STARTED</span>
+                            </div>
+                          )}
                         </div>
                       )
                     })()}

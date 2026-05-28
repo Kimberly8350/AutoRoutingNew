@@ -157,6 +157,28 @@ def load_driver_restrictions(client: Client) -> dict[int, dict]:
     return restrictions
 
 
+def load_driver_clock_events(client: Client, dispatch_date: date) -> dict[int, dict]:
+    """Returns {driver_id: {route_start_time, route_finish_time}} for the given shift date."""
+    try:
+        rows = (
+            client.table("driver_clock_events")
+            .select("driver_id,route_start_time,route_finish_time")
+            .eq("shift_date", dispatch_date.isoformat())
+            .execute()
+            .data
+        )
+        return {
+            int(r["driver_id"]): {
+                "route_start_time": _parse_dt(r.get("route_start_time")),
+                "route_finish_time": _parse_dt(r.get("route_finish_time")),
+            }
+            for r in rows if r.get("driver_id")
+        }
+    except Exception as e:
+        log.warning(f"Could not load driver clock events: {e}")
+        return {}
+
+
 def load_drivers_for_date(
     client: Client,
     dispatch_date: date,
@@ -180,6 +202,7 @@ def load_drivers_for_date(
 
     terminal_access = load_driver_terminal_access(client)
     restrictions = load_driver_restrictions(client)
+    clock_events = load_driver_clock_events(client, dispatch_date)
 
     drivers = []
     seen = set()
@@ -222,6 +245,10 @@ def load_drivers_for_date(
         rid = restrictions.get(int(did), {})
         driver.restricted_site_ids = rid.get("site_ids", set())
         driver.restricted_customer_groups = rid.get("customer_groups", set())
+
+        clk = clock_events.get(int(did), {})
+        driver.route_start_time = clk.get("route_start_time")
+        driver.route_finish_time = clk.get("route_finish_time")
 
         drivers.append(driver)
 

@@ -35,6 +35,9 @@ export const api = {
   getDispatchBoard: (date: string) =>
     apiFetch(`/api/dispatch?dispatch_date=${date}`),
 
+  getAlerts: (date: string) =>
+    apiFetch(`/api/dispatch/alerts?dispatch_date=${date}`),
+
   resequenceLoad: (ceId: number, driverId: number, sequence: number, dispatchDate: string) =>
     apiFetch(`/api/dispatch/${ceId}/resequence`, {
       method: 'PATCH',

@@ -500,6 +500,81 @@ def sync_driver_exceptions_from_mysql(client: Client) -> dict:
     return {"table": "driver_exceptions", "status": "ok", "rows_updated": updated}
 
 
+def sync_driver_clock_events_from_mysql(client: Client) -> dict:
+    """Sync driver clock-in/out times from vw_driver_details_feed into driver_clock_events."""
+    start = time.time()
+
+    if not all([CE_CONNECT_HOST, CE_CONNECT_USER, CE_CONNECT_PASSWORD, CE_CONNECT_DATABASE]):
+        return {"table": "driver_clock_events", "status": "skipped", "reason": "MySQL not configured"}
+
+    try:
+        conn = pymysql.connect(
+            host=CE_CONNECT_HOST, port=CE_CONNECT_PORT,
+            user=CE_CONNECT_USER, password=CE_CONNECT_PASSWORD,
+            database=CE_CONNECT_DATABASE, connect_timeout=15,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        try:
+            # NOTE: Verify column names match your vw_driver_details_feed view.
+            # Expected: driver_id, route_start_time, route_finish_time
+            # shift_date is derived from DATE(route_start_time) — the board date
+            # the driver is associated with (overnight drivers keep their board date).
+            query = """
+                SELECT
+                    driver_id,
+                    DATE(route_start_time)   AS shift_date,
+                    route_start_time,
+                    route_finish_time
+                FROM vw_driver_details_feed
+                WHERE route_start_time >= DATE_SUB(CURDATE(), INTERVAL 2 DAY)
+            """
+            with conn.cursor() as cur:
+                cur.execute(query)
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"MySQL clock events fetch failed: {e}")
+        return {"table": "driver_clock_events", "status": "error", "error": str(e)}
+
+    if not rows:
+        return {"table": "driver_clock_events", "status": "ok", "rows_upserted": 0}
+
+    records = []
+    for r in rows:
+        driver_id = r.get("driver_id")
+        shift_date = r.get("shift_date")
+        if not driver_id or not shift_date:
+            continue
+        route_start = r.get("route_start_time")
+        route_finish = r.get("route_finish_time")
+        records.append({
+            "driver_id": int(driver_id),
+            "shift_date": shift_date.isoformat() if hasattr(shift_date, "isoformat") else str(shift_date),
+            "route_start_time": route_start.isoformat() if hasattr(route_start, "isoformat") else (str(route_start) if route_start else None),
+            "route_finish_time": route_finish.isoformat() if hasattr(route_finish, "isoformat") else (str(route_finish) if route_finish else None),
+            "synced_at": datetime.now().isoformat(),
+        })
+
+    if not records:
+        return {"table": "driver_clock_events", "status": "ok", "rows_upserted": 0}
+
+    try:
+        for i in range(0, len(records), 500):
+            chunk = records[i:i + 500]
+            client.table("driver_clock_events").upsert(
+                chunk, on_conflict="driver_id,shift_date"
+            ).execute()
+
+        duration_ms = int((time.time() - start) * 1000)
+        log.info(f"✓ driver_clock_events: {len(records)} rows upserted in {duration_ms}ms")
+        return {"table": "driver_clock_events", "status": "ok", "rows_upserted": len(records)}
+
+    except Exception as e:
+        log.error(f"Upsert failed for driver_clock_events: {e}")
+        return {"table": "driver_clock_events", "status": "error", "error": str(e)}
+
+
 def sync_table(client: Client, table: str, filename: str) -> dict:
     start = time.time()
     filepath = EXCEL_DIR / filename
@@ -629,6 +704,8 @@ def run_sync():
     results.append(sync_load_details_from_mysql(client))
     # Exceptions override attendance — must run after driver_schedules Excel sync
     results.append(sync_driver_exceptions_from_mysql(client))
+    # Driver clock-in/out times from vw_driver_details_feed
+    results.append(sync_driver_clock_events_from_mysql(client))
     errors = [r for r in results if r.get("status") == "error"]
     if errors:
         log.warning(f"Sync complete with {len(errors)} error(s)")

@@ -59,6 +59,9 @@ class Driver:
     terminal_ids: set = field(default_factory=set)  # terminals driver has access to
     restricted_site_ids: set = field(default_factory=set)
     restricted_customer_groups: set = field(default_factory=set)
+    # clock events from CE Connect (populated by data loader)
+    route_start_time: Optional[datetime] = None
+    route_finish_time: Optional[datetime] = None
 
     @property
     def full_name(self) -> str:

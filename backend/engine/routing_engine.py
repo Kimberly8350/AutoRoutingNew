@@ -504,7 +504,31 @@ class RoutingEngine:
                 reroute_driver_id=load.assigned_driver_id if self.reroute else None,
             )
 
+            # Determine if this is a next-day load (delivery_date = tomorrow)
+            load_delivery_date = date.fromisoformat(load.delivery_date) if load.delivery_date else self.dispatch_date
+            is_next_day_load = load_delivery_date > self.dispatch_date
+
             for driver in sorted_drivers:
+                # Route locking: in reroute mode, skip drivers who have already
+                # clocked out — their shift is complete and no new loads should be added.
+                if self.reroute and driver.route_finish_time:
+                    continue
+
+                # Next-day load eligibility: only overnight drivers (shift extends past
+                # midnight) should receive loads with delivery_date = tomorrow.
+                # This prevents same-day drivers from delivering a next-day load early.
+                if is_next_day_load:
+                    shift_end = self._shift_end(driver)
+                    next_midnight = datetime(
+                        self.dispatch_date.year,
+                        self.dispatch_date.month,
+                        self.dispatch_date.day,
+                    ) + timedelta(days=1)
+                    if shift_end <= next_midnight:
+                        failure_reasons.append("Delivery window missed.")
+                        terminal_eligible_reasons.append("Delivery window missed.")
+                        continue
+
                 # Resolve terminal — try primary first, then site alternates
                 viable_terminal = self._get_viable_terminal(driver, load)
                 if not viable_terminal:
