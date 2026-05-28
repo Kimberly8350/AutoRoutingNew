@@ -42,6 +42,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
   const [history, setHistory] = useState<any[]>([])  // for undo
   const [activeBoard, setActiveBoard] = useState('TX-AM')
   const [alerts, setAlerts] = useState<any[]>([])
+  const [removingDriverId, setRemovingDriverId] = useState<number | null>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -237,6 +238,24 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
     const prev = history[history.length - 1]
     setBoards(JSON.parse(prev))
     setHistory(h => h.slice(0, -1))
+  }
+
+  async function removeDriver(driverId: number) {
+    try {
+      await api.updateAttendance(driverId, selectedDate, 0)
+      // Remove the driver column from local board state immediately
+      setBoards(prev => {
+        const next = { ...prev }
+        for (const loc of Object.keys(next)) {
+          next[loc] = next[loc].filter(col => col.driver_id !== driverId)
+        }
+        return next
+      })
+    } catch (e: any) {
+      setError(`Failed to remove driver: ${e.message}`)
+    } finally {
+      setRemovingDriverId(null)
+    }
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -684,16 +703,51 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
                       // attendance_expected===null means driver has loads but wasn't
                       // on the schedule — flag as an exception (like the * in legacy system)
                       const isException = sched.attendance_expected === null
+                      const isRemoving = removingDriverId === col.driver_id
                       return (
                         <div style={{
                           padding: '10px 12px',
                           borderBottom: '1px solid var(--border)',
-                          background: isException
+                          background: isRemoving
+                            ? 'rgba(239,68,68,0.08)'
+                            : isException
                             ? 'rgba(245,158,11,0.08)'
                             : 'var(--surface-overlay)',
                         }}>
+                          {/* Confirm-remove state */}
+                          {isRemoving ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <span style={{ fontSize: '11px', color: '#f87171', fontWeight: 600 }}>
+                                Remove {col.driver_name}?
+                              </span>
+                              <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                                Marks as not attending today.
+                              </span>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  onClick={() => removeDriver(col.driver_id)}
+                                  style={{
+                                    flex: 1, padding: '4px 0', fontSize: '11px', fontWeight: 600,
+                                    background: 'rgba(239,68,68,0.15)', color: '#f87171',
+                                    border: '1px solid rgba(239,68,68,0.35)', borderRadius: '4px',
+                                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                                  }}
+                                >Confirm</button>
+                                <button
+                                  onClick={() => setRemovingDriverId(null)}
+                                  style={{
+                                    flex: 1, padding: '4px 0', fontSize: '11px',
+                                    background: 'var(--surface-sunken)', color: 'var(--text-muted)',
+                                    border: '1px solid var(--border)', borderRadius: '4px',
+                                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                                  }}
+                                >Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                          <>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', marginBottom: '3px' }}>
-                            <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text)' }}>
+                            <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text)', flex: 1 }}>
                               {isException ? '* ' : ''}{col.driver_name}
                             </span>
                             {isException && (
@@ -703,6 +757,17 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
                                 background: 'rgba(245,158,11,0.15)', color: '#f59e0b',
                               }}>EXTRA</span>
                             )}
+                            <button
+                              onClick={() => setRemovingDriverId(col.driver_id)}
+                              title="Remove from board"
+                              style={{
+                                background: 'none', border: 'none',
+                                color: 'var(--text-dim)', cursor: 'pointer',
+                                fontSize: '14px', lineHeight: 1, padding: '0 2px',
+                                borderRadius: '3px', fontFamily: 'var(--font-body)',
+                                marginLeft: 'auto',
+                              }}
+                            >×</button>
                           </div>
                           <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                             {col.loads.length} load{col.loads.length !== 1 ? 's' : ''}
@@ -747,6 +812,8 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
                             <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
                               <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>NOT STARTED</span>
                             </div>
+                          )}
+                          </>
                           )}
                         </div>
                       )
