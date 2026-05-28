@@ -494,9 +494,17 @@ class RoutingEngine:
         sorted_loads = self._sort_loads(valid_loads)
 
         # Always seed locked/pre-assigned loads onto their drivers first so that
-        # capacity (4-stop limit) is accounted for before routing unscheduled loads.
+        # capacity is accounted for before routing unscheduled loads.
         load_map = {l.ce_id: l for l in self.loads}
         self._seed_locked_loads(load_map)
+
+        # Snapshot seeded stop counts per driver.
+        # The greedy loop uses this to track only *newly added* loads so that
+        # CE pre-assigned loads and routed loads are never double-counted when
+        # enforcing the 5-load cap.
+        initial_seeded: dict[int, int] = {
+            did: len(r.stops) for did, r in self.routes.items()
+        }
 
         assigned_ce_ids = set()
         for route in self.routes.values():
@@ -569,11 +577,15 @@ class RoutingEngine:
 
                 current_route = self.routes.get(driver.driver_id)
                 current_stops = []
-                seeded = len(current_route.stops) if current_route else 0
-                # Total committed = max(seeded by engine, CE pre-assigned count).
-                # max() prevents double-counting loads that appear in both.
-                total_committed = max(seeded, driver.pre_assigned_count)
-                if total_committed >= 5:
+                current_total = len(current_route.stops) if current_route else 0
+                seeds = initial_seeded.get(driver.driver_id, 0)
+                # Loads added by this routing run (excludes CE locks already seeded).
+                newly_added = current_total - seeds
+                # Available new-load slots = 5 minus CE pre-assigned count.
+                # CE locks that were seeded don't reduce this budget (they're
+                # already represented in pre_assigned_count).
+                available_new_slots = max(0, 5 - driver.pre_assigned_count)
+                if newly_added >= available_new_slots:
                     failure_reasons.append("Shift time exceeded.")
                     terminal_eligible_reasons.append("Shift time exceeded.")
                     continue

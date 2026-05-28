@@ -756,7 +756,14 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
 
     pre_assigned_loads = _fetch_pre_assigned(dispatch_date)
     if overnight_driver_ids:
-        pre_assigned_loads += _fetch_pre_assigned(prev_date)
+        # Include prev-date active loads for overnight drivers, but drop DELIVERED
+        # (status 26) — completed work from the previous calendar day doesn't belong
+        # on the next day's board and only clutters the dispatcher's view.
+        prev_pa = _fetch_pre_assigned(prev_date)
+        pre_assigned_loads += [
+            r for r in prev_pa
+            if int(r.get("load_status") or 0) != 26
+        ]
 
     dispatched_ce_ids = {r["ce_id"] for r in all_results}
     seen: set[int] = set()
