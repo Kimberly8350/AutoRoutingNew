@@ -209,6 +209,7 @@ def _serialize_routes(result):
                 "sequence": stop.sequence,
                 "ce_id": stop.ce_id,
                 "terminal_name": stop.terminal.terminal_name if stop.terminal else "",
+                "terminal_abbreviation": stop.terminal.abbreviation if stop.terminal else "",
                 "site_name": stop.site.site_name if stop.site else "",
                 "site_city": stop.site.city if stop.site else "",
                 "arrive_terminal": stop.arrive_terminal.isoformat() if stop.arrive_terminal else None,
@@ -520,6 +521,18 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
     results = client.table("dispatch_results").select("*").eq("dispatch_date", dispatch_date).execute().data
     unassigned = client.table("unassigned_loads").select("*").eq("dispatch_date", dispatch_date).execute().data
 
+    # Build terminal_name → abbreviation lookup for enriching load cards
+    _term_rows = client.table("terminal_locations").select("terminal_name,terminal_abbreviation,terminal_abreviation").execute().data
+    _term_abbr: dict[str, str] = {
+        r["terminal_name"].lower().strip(): (r.get("terminal_abbreviation") or r.get("terminal_abreviation") or "")
+        for r in _term_rows if r.get("terminal_name")
+    }
+
+    # Enrich dispatch_results rows with terminal_abbreviation
+    for row in results:
+        tname = (row.get("terminal_name") or "").lower().strip()
+        row["terminal_abbreviation"] = _term_abbr.get(tname, "")
+
     # Paginate load_details — Supabase default page limit is 1000 rows
     loads = []
     _page_size = 1000
@@ -635,6 +648,7 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             display_eta = load.get("completed_delivery_time") or load.get("delivery_eta")
         else:
             display_eta = load.get("delivery_eta")
+        _tname = (load.get("terminal_name") or "").lower().strip()
         pre_assigned.append({
             "dispatch_date": dispatch_date,
             "driver_id": driver["driver_id"],
@@ -643,6 +657,7 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             "ce_id": ce_id,
             "route_sequence": None,
             "terminal_name": load.get("terminal_name") or "",
+            "terminal_abbreviation": _term_abbr.get(_tname, ""),
             "site_name": load.get("site_name") or "",
             "site_city": load.get("city") or "",
             "eta": display_eta,

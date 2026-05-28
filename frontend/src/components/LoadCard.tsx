@@ -12,6 +12,7 @@ export interface LoadCardData {
   window_start?: string
   window_end?: string
   terminal_name: string
+  terminal_abbreviation?: string
   product_name: string
   load_status: number
   load_status_description: string
@@ -108,7 +109,7 @@ export function LoadCard({ load, isDragging }: Props) {
         {/* Customer · City on one line */}
         <div style={{
           fontSize: '10px',
-          color: 'var(--text-dim)',
+          color: '#60a5fa',
           fontFamily: 'var(--font-mono)',
           marginBottom: '1px',
           textTransform: 'uppercase',
@@ -172,7 +173,7 @@ export function LoadCard({ load, isDragging }: Props) {
 
         {/* Row: Terminal · Product */}
         <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          <span style={{ color: 'var(--text-dim)' }}>Term: </span>{load.terminal_name || '—'}
+          <span style={{ color: 'var(--text-dim)' }}>Term: </span>{load.terminal_abbreviation || load.terminal_name || '—'}
           <span style={{ color: 'var(--text-dim)', margin: '0 4px' }}>·</span>
           <span style={{ color: 'var(--text-dim)' }}>Prod: </span>{load.product_name || '—'}
         </div>
@@ -185,7 +186,7 @@ export function LoadCard({ load, isDragging }: Props) {
           justifyContent: 'space-between',
           alignItems: 'center',
         }}>
-          <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+          <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: '#60a5fa' }}>
             CE#{load.ce_id}{load.order_number ? ` · #${load.order_number}` : ''}
           </span>
           <span style={{

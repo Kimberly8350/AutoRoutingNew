@@ -102,6 +102,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
           sequence: row.route_sequence,
           eta: row.eta,
           terminal_name: row.terminal_name || load.terminal_name || '',
+          terminal_abbreviation: row.terminal_abbreviation || load.terminal_abbreviation || '',
           site_city: row.site_city || load.city || load.site_city || '',
         })
       }
@@ -121,6 +122,7 @@ export default function DispatchBoardTab({ selectedDate }: Props) {
         site_name: row.site_name || load?.site_name || '',
         site_city: row.site_city || load?.city || '',
         terminal_name: row.terminal_name || load?.terminal_name || '',
+        terminal_abbreviation: row.terminal_abbreviation || load?.terminal_abbreviation || '',
         load_status: row.load_status ?? load?.load_status,
         eta: row.eta,
         completed_delivery_time: row.completed_delivery_time ?? load?.completed_delivery_time,
