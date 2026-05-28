@@ -543,6 +543,13 @@ def get_dispatch_alerts(dispatch_date: str, user=Depends(verify_token)):
         .execute()
         .data
     )
+
+    # Guard: if no clock events exist for this date at all, the sync hasn't
+    # populated the table yet.  Suppress all alerts rather than falsely flagging
+    # every driver as "not started".
+    if not clock_rows:
+        return {"alerts": [], "as_of": now.isoformat()}
+
     clock_map = {r["driver_id"]: r for r in clock_rows}
 
     alerts = []
