@@ -613,111 +613,156 @@ def get_dispatch_board(dispatch_date: str, user=Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 def _get_dispatch_board_inner(dispatch_date: str, client):
-    results = client.table("dispatch_results").select("*").eq("dispatch_date", dispatch_date).execute().data
-    unassigned = client.table("unassigned_loads").select("*").eq("dispatch_date", dispatch_date).execute().data
+    from datetime import date as _date, timedelta as _td
 
-    # Build terminal_name → abbreviation lookup for enriching load cards
-    _term_rows = client.table("terminal_locations").select("terminal_name,terminal_abbreviation,terminal_abreviation").execute().data
+    dispatch_dt = _date.fromisoformat(dispatch_date)
+    prev_date = (dispatch_dt - _td(days=1)).isoformat()
+
+    # ---- helpers ----
+    def _is_overnight_start(start_time) -> bool:
+        """Driver starts at 20:00 or later → displays on next calendar day's AM board."""
+        if not start_time or ':' not in str(start_time):
+            return False
+        try:
+            return int(str(start_time).split(':')[0]) >= 20
+        except Exception:
+            return False
+
+    def _to_am_board(loc: str) -> str:
+        """Remap any board_location to its AM equivalent (TX-PM → TX-AM)."""
+        if not loc:
+            return loc
+        parts = loc.split('-')
+        return f"{parts[0]}-AM" if len(parts) == 2 else loc
+
+    # ---- terminal abbreviation lookup ----
+    _term_rows = client.table("terminal_locations").select(
+        "terminal_name,terminal_abbreviation,terminal_abreviation"
+    ).execute().data
     _term_abbr: dict[str, str] = {
-        r["terminal_name"].lower().strip(): (r.get("terminal_abbreviation") or r.get("terminal_abreviation") or "")
+        r["terminal_name"].lower().strip(): (
+            r.get("terminal_abbreviation") or r.get("terminal_abreviation") or ""
+        )
         for r in _term_rows if r.get("terminal_name")
     }
 
-    # Enrich dispatch_results rows with terminal_abbreviation
-    for row in results:
+    # ---- dispatch results ----
+    # Current date → same-day drivers; previous date → overnight drivers
+    results      = client.table("dispatch_results").select("*").eq("dispatch_date", dispatch_date).execute().data
+    prev_results = client.table("dispatch_results").select("*").eq("dispatch_date", prev_date).execute().data
+    unassigned   = client.table("unassigned_loads").select("*").eq("dispatch_date", dispatch_date).execute().data
+
+    for row in results + prev_results:
         tname = (row.get("terminal_name") or "").lower().strip()
         row["terminal_abbreviation"] = _term_abbr.get(tname, "")
 
-    # Paginate load_details — Supabase default page limit is 1000 rows
-    loads = []
-    _page_size = 1000
-    _offset = 0
-    while True:
-        _batch = (
-            client.table("load_details")
-            .select("*")
-            .eq("delivery_date", dispatch_date)
-            .range(_offset, _offset + _page_size - 1)
-            .execute()
-            .data
-        )
-        loads.extend(_batch)
-        if len(_batch) < _page_size:
-            break
-        _offset += _page_size
+    # ---- load details (paginated) ----
+    def _fetch_loads(d: str) -> list:
+        rows, offset, page = [], 0, 1000
+        while True:
+            batch = (
+                client.table("load_details").select("*").eq("delivery_date", d)
+                .range(offset, offset + page - 1).execute().data
+            )
+            rows.extend(batch)
+            if len(batch) < page:
+                break
+            offset += page
+        return rows
 
-    # Build pre-assigned rows: loads already in progress or delivered that
-    # have a driver name in the source data. These show on the board
-    # regardless of whether the routing engine has been run.
-    pre_assigned_loads = []
-    _pa_offset = 0
-    while True:
-        _pa_batch = (
-            client.table("load_details")
-            .select("ce_id,first_name,last_name,load_status,site_name,site_address,city,terminal_name,delivery_eta,window_start,window_end,product_name,gross_gallons,customer_name,order_number,completed_delivery_time")
-            .eq("delivery_date", dispatch_date)
-            .gt("load_status", 1)
-            .not_.is_("first_name", "null")
-            .range(_pa_offset, _pa_offset + 999)
-            .execute()
-            .data
-        )
-        pre_assigned_loads.extend(_pa_batch)
-        if len(_pa_batch) < 1000:
-            break
-        _pa_offset += 1000
+    loads      = _fetch_loads(dispatch_date)
+    prev_loads = _fetch_loads(prev_date)
 
-    # Only return drivers scheduled for this date (attendance_expected=1).
-    # This is the sole source of truth for who appears on the board —
-    # dispatch_results are filtered to this set before returning so that
-    # former employees or off-schedule drivers don't create ghost columns.
-    driver_rows = (
-        client.table("driver_schedules")
-        .select("driver_id,first_name,last_name,board_location,attendance_expected,driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours")
-        .eq("shift_date", dispatch_date)
-        .eq("attendance_expected", 1)
-        .not_.is_("board_location", "null")
-        .neq("board_location", "")
-        .not_.is_("yard", "null")
-        .neq("yard", "")
-        .execute()
-        .data
+    # ---- driver schedules ----
+    _driver_cols = (
+        "driver_id,first_name,last_name,board_location,attendance_expected,"
+        "driver_schedule,driver_start_time,yard,pump_trained,max_shift_hours"
     )
 
-    # Remove permanently inactive drivers from the board
+    def _fetch_drivers(d: str) -> list:
+        return (
+            client.table("driver_schedules").select(_driver_cols)
+            .eq("shift_date", d).eq("attendance_expected", 1)
+            .not_.is_("board_location", "null").neq("board_location", "")
+            .not_.is_("yard", "null").neq("yard", "")
+            .execute().data
+        )
+
+    # Same-day drivers whose shift starts before 20:00
+    current_drivers = [
+        d for d in _fetch_drivers(dispatch_date)
+        if not _is_overnight_start(d.get("driver_start_time"))
+    ]
+
+    # Previous-day drivers whose shift starts at 20:00+ → shown on this (next) day's AM board
+    overnight_drivers = [
+        d for d in _fetch_drivers(prev_date)
+        if _is_overnight_start(d.get("driver_start_time"))
+    ]
+    for d in overnight_drivers:
+        d["board_location"] = _to_am_board(d.get("board_location") or "")
+
+    driver_rows = current_drivers + overnight_drivers
+
+    # Remove permanently inactive drivers
     try:
-        inactive_rows = client.table("driver_inactive").select("driver_id").execute().data
-        inactive_ids = {r["driver_id"] for r in inactive_rows}
+        inactive_ids = {
+            r["driver_id"]
+            for r in client.table("driver_inactive").select("driver_id").execute().data
+        }
         if inactive_ids:
             driver_rows = [r for r in driver_rows if r.get("driver_id") not in inactive_ids]
     except Exception:
         pass
 
     scheduled_driver_ids = {r["driver_id"] for r in driver_rows}
+    overnight_driver_ids = {
+        d["driver_id"] for d in overnight_drivers
+        if d["driver_id"] in scheduled_driver_ids
+    }
 
-    # Strip dispatch_results for drivers not on today's schedule so stale
-    # results from past runs (or inactive employees) don't create board columns.
-    results = [r for r in results if r.get("driver_id") in scheduled_driver_ids]
+    # Filter dispatch results to scheduled drivers, keeping results on the
+    # correct date per driver type (overnight drivers → previous date results).
+    cur_results = [r for r in results      if r.get("driver_id") in scheduled_driver_ids - overnight_driver_ids]
+    ov_results  = [r for r in prev_results if r.get("driver_id") in overnight_driver_ids]
+    all_results = cur_results + ov_results
+
     driver_name_map: dict[str, dict] = {
         f"{d['first_name']} {d['last_name']}".strip().lower(): d
         for d in driver_rows
         if d.get("first_name") and d.get("last_name")
     }
 
-    # Deduplicate by ce_id (one row per load, not per product),
-    # skip any ce_id already covered by dispatch_results
-    dispatched_ce_ids = {r["ce_id"] for r in results}
+    # ---- pre-assigned loads (status > 1 with driver name) ----
+    def _fetch_pre_assigned(d: str) -> list:
+        cols = (
+            "ce_id,first_name,last_name,load_status,site_name,site_address,city,"
+            "terminal_name,delivery_eta,window_start,window_end,product_name,"
+            "gross_gallons,customer_name,order_number,completed_delivery_time"
+        )
+        rows, offset, page = [], 0, 1000
+        while True:
+            batch = (
+                client.table("load_details").select(cols)
+                .eq("delivery_date", d).gt("load_status", 1)
+                .not_.is_("first_name", "null")
+                .range(offset, offset + page - 1).execute().data
+            )
+            rows.extend(batch)
+            if len(batch) < page:
+                break
+            offset += page
+        return rows
+
+    pre_assigned_loads = _fetch_pre_assigned(dispatch_date)
+    if overnight_driver_ids:
+        pre_assigned_loads += _fetch_pre_assigned(prev_date)
+
+    dispatched_ce_ids = {r["ce_id"] for r in all_results}
     seen: set[int] = set()
     pre_assigned: list[dict] = []
 
     def _pa_sort_key(r: dict):
-        """
-        Sort order for pre-assigned loads within a driver's column:
-          1. Delivered (26): sort by completed_delivery_time asc
-          2. In-progress (22, 24): sort by delivery_eta asc
-          3. Assigned-not-started (10): sort by delivery_eta asc
-          4. Everything else: push to end
-        """
         status = int(r.get("load_status") or 0)
         if status == 26:
             return (0, r.get("completed_delivery_time") or "9999")
@@ -738,11 +783,10 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         if not driver:
             continue
         status = int(load.get("load_status") or 0)
-        # Use status-appropriate time as the display ETA
-        if status == 26:
-            display_eta = load.get("completed_delivery_time") or load.get("delivery_eta")
-        else:
-            display_eta = load.get("delivery_eta")
+        display_eta = (
+            load.get("completed_delivery_time") or load.get("delivery_eta")
+            if status == 26 else load.get("delivery_eta")
+        )
         _tname = (load.get("terminal_name") or "").lower().strip()
         pre_assigned.append({
             "dispatch_date": dispatch_date,
@@ -761,15 +805,23 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             "pre_assigned": True,
         })
 
-    # Load clock events for this date and attach to driver rows
+    # ---- clock events ----
+    # Current-day drivers → shift_date = dispatch_date
+    # Overnight drivers   → shift_date = prev_date
     try:
         clock_rows = (
             client.table("driver_clock_events")
             .select("driver_id,route_start_time,route_finish_time")
-            .eq("shift_date", dispatch_date)
-            .execute()
-            .data
+            .eq("shift_date", dispatch_date).execute().data
         )
+        if overnight_driver_ids:
+            prev_clock = (
+                client.table("driver_clock_events")
+                .select("driver_id,route_start_time,route_finish_time")
+                .eq("shift_date", prev_date).execute().data
+            )
+            clock_rows += [r for r in prev_clock if r.get("driver_id") in overnight_driver_ids]
+
         clock_map = {r["driver_id"]: r for r in clock_rows}
         for dr in driver_rows:
             clk = clock_map.get(dr.get("driver_id"), {})
@@ -781,10 +833,10 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             dr["route_finish_time"] = None
 
     return {
-        "dispatch_results": results,
+        "dispatch_results": all_results,
         "pre_assigned": pre_assigned,
         "unassigned": unassigned,
-        "loads": loads,
+        "loads": loads + prev_loads,
         "driver_schedules": driver_rows,
     }
 
