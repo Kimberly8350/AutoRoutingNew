@@ -801,6 +801,17 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         if load.get("_board_date") == prev_date and driver["driver_id"] not in overnight_driver_ids:
             continue
         status = int(load.get("load_status") or 0)
+        # For overnight drivers, skip dispatch_date loads that are still status=2
+        # (CE-scheduled but not yet dispatched).  Status-2 on the dispatch_date
+        # means those loads belong to the driver's NEXT shift starting that evening
+        # — e.g. a driver whose current shift ends ~10:00 will have new status-2
+        # loads for 22:00 that night; those should appear on the *next* board, not
+        # the current one.  Active current-shift loads will already be status > 2
+        # (dispatched / en-route / delivered) by the time the board is viewed.
+        if (load.get("_board_date") == dispatch_date
+                and driver["driver_id"] in overnight_driver_ids
+                and status == 2):
+            continue
         display_eta = (
             load.get("completed_delivery_time") or load.get("delivery_eta")
             if status == 26 else load.get("delivery_eta")
