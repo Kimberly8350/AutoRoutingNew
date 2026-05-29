@@ -334,16 +334,24 @@ class RoutingEngine:
 
     def _locked_load_sort_key(self, load: Load):
         """
-        Sort key for pre-assigned loads on a driver's column:
-        - Status 26 (delivered): sort by completed_delivery_time ascending
-        - Status 10/22/24: sort by delivery_eta ascending
-        - Others: push to end
+        Sort locked loads into chronological shift order:
+
+          1. Delivered (26)         — completed; by completed_delivery_time asc
+          2. At Site (24)           — currently unloading
+          3. En Route to Site (22)  — loaded, driving to delivery
+          4. At Rack (20)           — loading at terminal
+          5. En Route to Rack (12)  — driving to terminal
+          6. Dispatched (10)        — queued, not yet started
+
+        Within groups 2–6 sort by delivery_eta (or window_start for status 10
+        loads that may not have an eta yet).  Higher status = further along =
+        shown earlier because it happened (or is happening) first.
         """
         if load.load_status == STATUS_DELIVERED:
-            return (0, load.completed_delivery_time or datetime.max)
-        if load.load_status in (STATUS_EN_ROUTE_SITE, STATUS_AT_SITE, STATUS_ASSIGNED):
-            return (1, load.delivery_eta or datetime.max)
-        return (2, datetime.max)
+            return (0, 0, load.completed_delivery_time or datetime.max)
+        # For all active/queued loads: negate status so higher status sorts first
+        eta = load.delivery_eta or load.window_start or datetime.max
+        return (1, -load.load_status, eta)
 
     def _seed_locked_loads(self, load_map: dict[int, Load]):
         """Preserve loads with locked statuses on their assigned driver.
