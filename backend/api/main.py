@@ -775,21 +775,15 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             offset += page
         return rows
 
+    # CE stores delivery_date = the board date for a shift, not the actual
+    # calendar date of delivery.  Every load for an overnight driver's shift
+    # therefore has delivery_date = dispatch_date (their CE board date).
+    # Fetching prev_date loads was causing the *previous* completed overnight
+    # shift (same driver, delivery_date = prev_date = their last board date)
+    # to bleed onto the current board — e.g. Quin showing two full shifts.
+    # dispatch_date alone is correct; ov_results covers any routing-engine
+    # assignments that landed in dispatch_results with dispatch_date = prev_date.
     pre_assigned_loads = _fetch_pre_assigned(dispatch_date)
-    # Tag each row so we can filter by origin date later in the building loop.
-    for r in pre_assigned_loads:
-        r["_board_date"] = dispatch_date
-
-    if overnight_driver_ids:
-        # Include ALL prev-date loads for overnight drivers — DELIVERED loads from
-        # prev_date are part of the same shift and must show on the current board.
-        # Non-overnight drivers are already blocked from seeing prev-date loads by
-        # the _board_date guard in the building loop below, so the old status != 26
-        # filter is no longer needed and was incorrectly hiding completed shift work.
-        prev_pa = _fetch_pre_assigned(prev_date)
-        for r in prev_pa:
-            r["_board_date"] = prev_date
-        pre_assigned_loads += prev_pa
 
     dispatched_ce_ids = {r["ce_id"] for r in all_results}
     seen: set[int] = set()
@@ -815,22 +809,12 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         driver = driver_name_map.get(f"{fname} {lname}".lower())
         if not driver:
             continue
-        # Prev-date loads must only appear on overnight driver columns.
-        # A regular driver (e.g. Juan, starts 04:30) who is also scheduled the
-        # following day must NOT inherit his prev-day CE loads on that next board.
-        if load.get("_board_date") == prev_date and driver["driver_id"] not in overnight_driver_ids:
-            continue
         status = int(load.get("load_status") or 0)
-        # For overnight drivers, skip dispatch_date loads that are still status=2
-        # (CE-scheduled but not yet dispatched).  Status-2 on the dispatch_date
-        # means those loads belong to the driver's NEXT shift starting that evening
-        # — e.g. a driver whose current shift ends ~10:00 will have new status-2
-        # loads for 22:00 that night; those should appear on the *next* board, not
-        # the current one.  Active current-shift loads will already be status > 2
-        # (dispatched / en-route / delivered) by the time the board is viewed.
-        if (load.get("_board_date") == dispatch_date
-                and driver["driver_id"] in overnight_driver_ids
-                and status == 2):
+        # For overnight drivers (start >= 20:00), skip status=2 loads.
+        # Status-2 = CE-scheduled but not yet dispatched = next-night shift loads.
+        # Their current-shift work will already be status > 2 (dispatched /
+        # en-route / delivered) by the time this board is viewed.
+        if driver["driver_id"] in overnight_driver_ids and status == 2:
             continue
         display_eta = (
             load.get("completed_delivery_time") or load.get("delivery_eta")
