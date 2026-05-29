@@ -422,18 +422,43 @@ class RoutingEngine:
             route = self.routes[driver.driver_id]
 
             for load in locked_loads:
-                # Capacity: total committed = max(seeded so far, CE pre-assigned count)
-                # Using max() avoids double-counting loads that are both seeded and in
-                # the pre_assigned_count.
-                total_committed = max(len(route.stops), driver.pre_assigned_count)
-                if total_committed >= 5:
-                    break
-                current_stops = [(self._find_load_by_ce(s.ce_id), s.sequence) for s in route.stops]
-                current_stops.append((load, len(current_stops)))
-                simulated = self._simulate_route(driver, current_stops)
-                if simulated:
-                    self.routes[driver.driver_id] = simulated
-                    route = self.routes[driver.driver_id]
+                # All loads reaching this loop are in LOCKED_STATUSES (status 10–26).
+                # They are physically committed — the driver is already dispatched,
+                # en-route, or has completed the delivery.
+                #
+                # Do NOT apply the 5-load cap here and do NOT call _simulate_route.
+                #
+                # Cap problem: pre_assigned_count counts ALL status>1 loads for both
+                # dispatch_date AND dispatch_date+1.  A non-overnight driver with
+                # 4 in-motion loads today and 1 status=2 load pre-planned for tomorrow
+                # would have pre_assigned_count=5, causing the cap to fire immediately
+                # and seed ZERO loads — leaving all dispatched work as unnumbered cards.
+                #
+                # Simulation problem: _simulate_route returns None whenever terminal/
+                # site geo data is missing or shift_end is exceeded (e.g. overnight
+                # loads spanning midnight break the timing math).  For already-committed
+                # loads these constraints don't apply; the load MUST appear in
+                # dispatch_results regardless.
+                #
+                # Solution: directly append a bare RouteStop.  Timing fields are
+                # populated from CE data (delivery_eta / completed_delivery_time).
+                bare_stop = RouteStop(
+                    ce_id=load.ce_id,
+                    sequence=len(route.stops),
+                    terminal=load.terminal or Terminal("", "", 0.0, 0.0),
+                    site=load.site or Site(0, "", 0.0, 0.0),
+                    arrive_site=load.delivery_eta,
+                    depart_site=(
+                        load.completed_delivery_time
+                        if load.load_status == STATUS_DELIVERED
+                        else load.delivery_eta
+                    ),
+                )
+                route.stops.append(bare_stop)
+                log.debug(
+                    f"Seeded locked ce_id={load.ce_id} status={load.load_status} "
+                    f"driver={driver_id} seq={bare_stop.sequence}"
+                )
 
     # ---- main run ----
 
