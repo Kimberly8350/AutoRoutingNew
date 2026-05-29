@@ -506,6 +506,22 @@ class RoutingEngine:
             did: len(r.stops) for did, r in self.routes.items()
         }
 
+        # Lock boundary per driver: the first insertion index that is safe for
+        # a new load.  Any seeded stop with load_status > 10 (en-route, at-site,
+        # delivered) is already physically in motion — inserting a new load before
+        # or between those stops is impossible.  New loads may only be appended
+        # AFTER the last such stop.
+        # Status 10 (dispatched) is NOT considered locked here because the driver
+        # hasn't left the terminal yet and scheduling around it is still valid.
+        lock_boundaries: dict[int, int] = {}
+        for driver_id, route in self.routes.items():
+            last_locked_idx = -1
+            for i, stop in enumerate(route.stops):
+                seeded_load = load_map.get(stop.ce_id)
+                if seeded_load and seeded_load.load_status > 10:
+                    last_locked_idx = i
+            lock_boundaries[driver_id] = last_locked_idx + 1
+
         assigned_ce_ids = set()
         for route in self.routes.values():
             for stop in route.stops:
@@ -608,8 +624,11 @@ class RoutingEngine:
                 else:
                     working_load = load
 
-                # Try inserting this load at each position
-                insert_positions = list(range(len(current_stops) + 1))
+                # Try inserting this load at each valid position.
+                # Positions before the lock boundary are off-limits — the driver
+                # is already past those stops (en-route / at-site / delivered).
+                lock_pos = lock_boundaries.get(driver.driver_id, 0)
+                insert_positions = list(range(lock_pos, len(current_stops) + 1))
                 for pos in insert_positions:
                     diesel_wet_fail = self._check_diesel_wet_sequence(driver, working_load, pos)
                     if diesel_wet_fail:
