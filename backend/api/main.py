@@ -512,13 +512,32 @@ def get_dispatch_alerts(dispatch_date: str, user=Depends(verify_token)):
     """Return active driver alerts for the given dispatch date.
     Only generates alerts when viewing today's board."""
     from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
     client = get_supabase()
 
-    today = date.today().isoformat()
-    if dispatch_date != today:
-        return {"alerts": [], "as_of": dt.now().isoformat()}
+    # All time comparisons must use Central time.  Render servers run UTC so
+    # dt.now() would be 5-6 hours ahead, causing alerts to fire prematurely.
+    _CENTRAL = ZoneInfo("America/Chicago")
 
-    now = dt.now()
+    def _to_central_naive(val) -> "dt | None":
+        """Parse any timestamp string and return a tz-naive Central datetime."""
+        if not val:
+            return None
+        try:
+            s = str(val).strip().replace("Z", "+00:00")
+            parsed = dt.fromisoformat(s)
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(_CENTRAL).replace(tzinfo=None)
+            return parsed  # already naive — assumed Central (CE Connect source)
+        except Exception:
+            return None
+
+    now_central = dt.now(_CENTRAL)
+    now = now_central.replace(tzinfo=None)   # naive Central — used for all comparisons
+
+    today = now_central.date().isoformat()   # Central date (not server UTC date)
+    if dispatch_date != today:
+        return {"alerts": [], "as_of": now.isoformat()}
 
     driver_rows = (
         client.table("driver_schedules")
@@ -575,7 +594,9 @@ def get_dispatch_alerts(dispatch_date: str, user=Depends(verify_token)):
         if route_start_raw:
             # Driver has clocked in — check for delayed start (≥45 min late)
             try:
-                actual_start = dt.fromisoformat(str(route_start_raw).replace("Z", ""))
+                actual_start = _to_central_naive(route_start_raw)
+                if actual_start is None:
+                    continue
                 delay_mins = (actual_start - scheduled_start).total_seconds() / 60
                 if delay_mins >= 45:
                     alerts.append({
