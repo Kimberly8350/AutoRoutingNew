@@ -760,16 +760,15 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
         r["_board_date"] = dispatch_date
 
     if overnight_driver_ids:
-        # Include prev-date active loads for overnight drivers, but drop DELIVERED
-        # (status 26) — completed work from the previous calendar day doesn't belong
-        # on the next day's board and only clutters the dispatcher's view.
+        # Include ALL prev-date loads for overnight drivers — DELIVERED loads from
+        # prev_date are part of the same shift and must show on the current board.
+        # Non-overnight drivers are already blocked from seeing prev-date loads by
+        # the _board_date guard in the building loop below, so the old status != 26
+        # filter is no longer needed and was incorrectly hiding completed shift work.
         prev_pa = _fetch_pre_assigned(prev_date)
         for r in prev_pa:
             r["_board_date"] = prev_date
-        pre_assigned_loads += [
-            r for r in prev_pa
-            if int(r.get("load_status") or 0) != 26
-        ]
+        pre_assigned_loads += prev_pa
 
     dispatched_ce_ids = {r["ce_id"] for r in all_results}
     seen: set[int] = set()
