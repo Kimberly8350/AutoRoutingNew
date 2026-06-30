@@ -20,6 +20,7 @@ from engine.data_loader import (
     load_drivers_for_date, load_loads_for_date,
 )
 from engine.routing_engine import RoutingEngine
+from engine.geo import clear_travel_cache
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -159,6 +160,10 @@ async def run_dispatch(
 
     if not drivers:
         raise HTTPException(status_code=422, detail="No active drivers found for this date.")
+
+    # Clear travel time cache so this run gets fresh Google Maps results
+    # (cache is per-process; clearing ensures stale times from prior runs don't carry over)
+    clear_travel_cache()
 
     engine = RoutingEngine(
         drivers=drivers,
