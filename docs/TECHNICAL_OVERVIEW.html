@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoRoute — Technical Overview</title>
+<style>
+:root {
+  --bg:#0f1117;--surface:#161b22;--surface2:#1c2230;--border:#30363d;
+  --accent:#f0883e;--accent-dim:rgba(240,136,62,0.12);
+  --blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#e3b341;
+  --text:#e6edf3;--text-muted:#8b949e;--text-dim:#484f58;
+  --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  --sw:276px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.8;display:flex}
+
+/* ── Sidebar ── */
+#sb{width:var(--sw);min-width:var(--sw);background:var(--surface);border-right:1px solid var(--border);height:100vh;position:sticky;top:0;overflow-y:auto;padding:0 0 48px;flex-shrink:0}
+.sb-brand{display:flex;align-items:center;gap:10px;padding:20px;border-bottom:1px solid var(--border)}
+.sb-icon{width:32px;height:32px;background:var(--accent);border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sb-name{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.3px}
+.sb-sub{font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-top:1px}
+.nav-lbl{padding:18px 20px 4px;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim)}
+#sb a{display:block;padding:6px 20px;font-size:12.5px;color:var(--text-muted);text-decoration:none;border-left:2px solid transparent;transition:color .12s,background .12s}
+#sb a:hover{color:var(--text);background:rgba(255,255,255,0.04)}
+#sb a.on{color:var(--accent);border-left-color:var(--accent);background:var(--accent-dim)}
+
+/* ── Content ── */
+#ct{flex:1;min-width:0;padding:52px 58px 96px;max-width:900px}
+
+/* Doc header */
+.dh{margin-bottom:40px;padding-bottom:28px;border-bottom:1px solid var(--border)}
+.dh h1{font-size:27px;font-weight:700;letter-spacing:-.5px;margin-bottom:12px;line-height:1.3}
+.dh .intro{font-size:15px;color:var(--text-muted);line-height:1.8;margin-bottom:16px;max-width:700px}
+.badges{display:flex;flex-wrap:wrap;gap:6px}
+.bdg{padding:3px 10px;border-radius:4px;font-size:11.5px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--border);color:var(--text-muted)}
+.bdg.hi{background:var(--accent-dim);border-color:rgba(240,136,62,.3);color:var(--accent)}
+
+/* Sections */
+.sec{margin-bottom:60px;scroll-margin-top:24px}
+.sec h2{font-size:20px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;padding-bottom:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sn{font-size:10px;font-family:var(--mono);color:var(--accent);background:var(--accent-dim);border:1px solid rgba(240,136,62,.25);padding:1px 7px;border-radius:3px;font-weight:600;flex-shrink:0}
+.sec-intro{font-size:14.5px;color:var(--text-muted);line-height:1.8;margin-bottom:18px;padding:14px 16px;background:var(--surface2);border-left:3px solid var(--accent);border-radius:0 6px 6px 0}
+.sec h3{font-size:15px;font-weight:600;color:var(--text);margin:26px 0 10px}
+.sec h4{font-size:11.5px;font-weight:700;color:var(--text-dim);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.07em;font-family:var(--mono)}
+.sec p{color:var(--text-muted);margin-bottom:12px;line-height:1.8}
+.sec ul,.sec ol{color:var(--text-muted);padding-left:22px;margin-bottom:12px}
+.sec li{margin-bottom:6px;line-height:1.75}
+.sec strong,.sec b{color:var(--text)}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Code */
+pre{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px 18px;overflow-x:auto;margin:12px 0 16px;font-family:var(--mono);font-size:12px;line-height:1.7;color:#c9d1d9}
+code{font-family:var(--mono);font-size:12px;background:rgba(110,118,129,.14);border:1px solid rgba(110,118,129,.18);border-radius:3px;padding:1px 5px;color:#c9d1d9}
+pre code{background:none;border:none;padding:0;font-size:inherit}
+
+/* Tables */
+.tw{overflow-x:auto;margin:14px 0 18px;border-radius:8px;border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead tr{background:var(--surface2)}
+th{padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 14px;color:var(--text-muted);border-bottom:1px solid rgba(48,54,61,.5);vertical-align:top;line-height:1.7}
+tr:last-child td{border-bottom:none}
+tr:nth-child(even) td{background:rgba(255,255,255,.013)}
+
+/* HTTP method pills */
+.m{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;white-space:nowrap}
+.GET{background:rgba(63,185,80,.12);color:#3fb950;border:1px solid rgba(63,185,80,.28)}
+.POST{background:rgba(88,166,255,.12);color:#58a6ff;border:1px solid rgba(88,166,255,.28)}
+.PATCH{background:rgba(227,179,65,.12);color:#e3b341;border:1px solid rgba(227,179,65,.28)}
+.DELETE{background:rgba(248,81,73,.12);color:#f85149;border:1px solid rgba(248,81,73,.28)}
+
+/* Callout boxes */
+.note{display:flex;gap:12px;padding:14px 16px;border-radius:8px;margin:14px 0;font-size:13.5px;line-height:1.7}
+.note .ni{font-size:17px;flex-shrink:0;margin-top:1px}
+.note p{margin:0;color:inherit}
+.warn{background:rgba(227,179,65,.08);border:1px solid rgba(227,179,65,.22);color:#c9a82a}
+.info{background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.22);color:#58a6ff}
+.tip{background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.22);color:#3fb950}
+
+/* Phase cards */
+.phases{display:flex;flex-direction:column;gap:12px;margin:14px 0}
+.ph{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px 18px 16px 52px;position:relative}
+.phn{position:absolute;left:14px;top:16px;width:24px;height:24px;background:var(--accent-dim);border:1px solid rgba(240,136,62,.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--accent);font-family:var(--mono)}
+.ph .pt{font-weight:600;color:var(--text);font-size:14px;margin-bottom:6px}
+.ph p{color:var(--text-muted);font-size:13.5px;margin:0;line-height:1.75}
+
+/* Arch diagram boxes */
+.arch{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:20px;margin:16px 0;display:flex;flex-direction:column;align-items:center;gap:8px}
+.abox{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:12px 20px;text-align:center;width:100%;max-width:620px}
+.abox.hi{background:var(--accent-dim);border-color:rgba(240,136,62,.35)}
+.abox .at{font-weight:700;color:var(--text);font-size:13.5px;margin-bottom:4px}
+.abox .as{font-size:11.5px;color:var(--text-muted);font-family:var(--mono);line-height:1.6}
+.arow{display:flex;gap:16px;width:100%;max-width:620px;justify-content:center}
+.arow .abox{flex:1}
+.arr{color:var(--text-dim);font-size:13px;text-align:center}
+
+/* File meta row */
+.fmeta{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:7px}
+.fmeta-row{display:flex;gap:10px;font-size:13px;align-items:baseline}
+.fmeta-lbl{color:var(--text-dim);font-family:var(--mono);font-size:10.5px;min-width:80px;text-transform:uppercase;letter-spacing:.05em}
+.fmeta-val{color:var(--text-muted)}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* Divider */
+.divider{border:none;border-top:1px solid var(--border);margin:44px 0 20px}
+
+/* Footer */
+.footer{font-size:12px;color:var(--text-dim);font-family:var(--mono);line-height:1.8}
+
+@media(max-width:880px){#sb{display:none}#ct{padding:28px 20px 64px}}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════
+     SIDEBAR
+══════════════════════════════════════════════ -->
+<nav id="sb">
+  <div class="sb-brand">
+    <div class="sb-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
+        <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17M17 13v4a2 2 0 01-4 0"/>
+      </svg>
+    </div>
+    <div>
+      <div class="sb-name">AutoRoute</div>
+      <div class="sb-sub">Technical Overview</div>
+    </div>
+  </div>
+
+  <div class="nav-lbl">Introduction</div>
+  <a href="#what-is">What Is AutoRoute?</a>
+  <a href="#arch">1. System Architecture</a>
+  <a href="#dataflow">2. Data Flow</a>
+
+  <div class="nav-lbl">Data Layer</div>
+  <a href="#schema">3. Database Schema</a>
+  <a href="#sync">4. Sync Pipeline</a>
+
+  <div class="nav-lbl">Backend</div>
+  <a href="#api">5. Backend API</a>
+  <a href="#engine">6. Routing Engine</a>
+  <a href="#geo">7. Geo &amp; Travel Time</a>
+
+  <div class="nav-lbl">Frontend</div>
+  <a href="#frontend">8. Frontend Application</a>
+  <a href="#authz">9. Auth &amp; Authorization</a>
+
+  <div class="nav-lbl">Operations</div>
+  <a href="#deploy">10. Deployment</a>
+  <a href="#setup">11. Setup Guide</a>
+  <a href="#config">12. Configuration</a>
+  <a href="#trouble">13. Troubleshooting</a>
+</nav>
+
+<!-- ══════════════════════════════════════════════
+     MAIN CONTENT
+══════════════════════════════════════════════ -->
+<main id="ct">
+
+<!-- ── Doc Header ── -->
+<div class="dh">
+  <h1>AutoRoute — Technical Overview</h1>
+  <p class="intro">
+    This document is a complete technical reference for the AutoRoute fuel dispatch system. It covers how every part of the system works — from the Excel files that feed it with data, to the routing algorithm that assigns drivers, to the web dashboard dispatchers use every day. Whether you are a developer joining the project, an administrator setting it up for the first time, or simply someone trying to understand how the system makes decisions, this guide is written for you.
+  </p>
+  <div class="badges">
+    <span class="bdg hi">v1.0 · June 2026</span>
+    <span class="bdg">Python 3 · FastAPI 0.115</span>
+    <span class="bdg">Next.js 14 · TypeScript</span>
+    <span class="bdg">Supabase · PostgreSQL</span>
+    <span class="bdg">Google Maps Routes API</span>
+    <span class="bdg">Render · Vercel</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     WHAT IS AUTOROUTE?
+══════════════════════════════════════════════ -->
+<div class="sec" id="what-is">
+  <h2><span class="sn">00</span> What Is AutoRoute?</h2>
+  <p class="sec-intro">
+    AutoRoute is a software system that automatically plans daily fuel delivery routes for a fleet of tanker truck drivers. Instead of a dispatcher spending hours manually matching drivers to loads, the system takes in that day's delivery orders, checks which drivers are available and certified, calculates realistic drive times using Google Maps, and produces an optimized schedule — in seconds.
+  </p>
+
+  <h3>The Problem It Solves</h3>
+  <p>
+    A fuel distribution company receives hundreds of delivery orders per day. Each order (called a <strong>load</strong> or identified by a <strong>CE ID</strong>) specifies a customer site that needs fuel, which terminal (fuel loading rack) to pick up from, what products are needed (Regular, Diesel, etc.), how many gallons, and sometimes a delivery window the customer expects to be served within.
+  </p>
+  <p>
+    Dispatchers previously had to manually match each load to an available driver, taking into account: Does the driver have an access card for that terminal? Are they certified to operate the pump at that site? Are they restricted from certain customers? Will the driving time fit within their shift? Will they arrive on time for the delivery window? Doing this for 15+ drivers and 100+ loads every morning is error-prone and time-consuming.
+  </p>
+  <p>
+    AutoRoute automates this entire process. It enforces all the same rules the dispatcher would check manually, then applies an optimization algorithm to minimize wasted empty miles across the entire fleet.
+  </p>
+
+  <h3>Key Concepts Glossary</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Term</th><th>What It Means</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Load / CE ID</strong></td><td>A single fuel delivery order. Each load has a customer site destination, a terminal to pick up from, products needed, and an optional delivery time window.</td></tr>
+      <tr><td><strong>Terminal (Rack)</strong></td><td>A fuel loading facility where drivers fill their tanker. Drivers must have a valid access card to load at a terminal. Some terminals are "diesel-wet" which imposes product sequencing rules.</td></tr>
+      <tr><td><strong>Site</strong></td><td>A customer delivery location (e.g. a gas station). Some sites require a pump-certified driver.</td></tr>
+      <tr><td><strong>Yard</strong></td><td>The home base where a driver starts and ends their shift.</td></tr>
+      <tr><td><strong>Board Location</strong></td><td>The operational group a driver belongs to (TX-AM, TX-PM, FW-AM, FW-PM, ET-AM). Used to organize the dispatch board visually.</td></tr>
+      <tr><td><strong>Dispatch Run</strong></td><td>One execution of the routing engine for a specific date. Produces a full assignment of loads to drivers.</td></tr>
+      <tr><td><strong>Reroute</strong></td><td>A re-run of the engine mid-day, which respects loads already in progress (a driver already heading to the rack stays on that load) and only re-optimizes the unstarted remainder.</td></tr>
+      <tr><td><strong>ODBC</strong></td><td>The company's existing dispatch database. AutoRoute reads from it via Excel files that are automatically refreshed, rather than connecting to it directly.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>How a Typical Day Works</h3>
+  <p>Here is the end-to-end picture of a typical dispatch day, in plain language:</p>
+  <ol>
+    <li><strong>Overnight / early morning:</strong> The sync script (running on a PC at the office) reads the latest Excel files and pushes all updated load orders, driver schedules, and terminal access data into the Supabase database.</li>
+    <li><strong>Morning:</strong> A dispatcher opens the AutoRoute dashboard in their browser. They check which drivers are confirmed as working that day, toggling attendance as needed.</li>
+    <li><strong>Run Dispatch:</strong> The dispatcher clicks "Run Dispatch" for today's date. The routing engine runs in seconds, assigning loads to drivers, sequencing stops, and calculating ETAs.</li>
+    <li><strong>Review the Board:</strong> The dispatch board shows each driver's assigned loads as cards in columns. The dispatcher can drag cards to resequence, see which loads are unassigned and why, and make manual adjustments.</li>
+    <li><strong>Mid-day reroute:</strong> As drivers start their routes, their load statuses update in real time via the sync. If a new urgent load comes in, the dispatcher runs "Reroute" — the engine locks any loads already in progress and re-optimizes the rest.</li>
+    <li><strong>End of day:</strong> All delivered loads show as status 26 (Delivered) on the board. The full day's run is stored in the database for audit purposes.</li>
+  </ol>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     1. SYSTEM ARCHITECTURE
+══════════════════════════════════════════════ -->
+<div class="sec" id="arch">
+  <h2><span class="sn">01</span> System Architecture</h2>
+  <p class="sec-intro">
+    AutoRoute is built as four distinct layers, each with a clear responsibility. Data flows in one direction: from the source Excel files → into the database → through the API → to the browser. No layer needs to know how the others work internally, which makes each part easy to replace or upgrade independently.
+  </p>
+
+  <div class="arch">
+    <div class="abox">
+      <div class="at">📊 Source Data</div>
+      <div class="as">Excel files on a local PC, auto-refreshed by ODBC from the company's dispatch system</div>
+    </div>
+    <div class="arr">↓ &nbsp;<span style="font-family:var(--mono);font-size:11px;color:var(--text-muted)">sync/sync.py — reads Excel, pushes to Supabase every 5 minutes</span></div>
+    <div class="abox hi">
+      <div class="at">🗄️ Database — Supabase (PostgreSQL)</div>
+      <div class="as">Single source of truth · 12 tables · Row-Level Security · accessible from anywhere</div>
+    </div>
+    <div style="display:flex;gap:60px;color:var(--text-dim);font-size:11px;font-family:var(--mono);margin-top:2px">
+      <span>↙ backend reads via supabase-py (service key)</span>
+      <span>frontend reads via supabase-js (anon key) ↘</span>
+    </div>
+    <div class="arow">
+      <div class="abox">
+        <div class="at">⚙️ Backend API</div>
+        <div class="as">Python · FastAPI · hosted on Render</div>
+      </div>
+      <div class="abox">
+        <div class="at">🖥️ Frontend Dashboard</div>
+        <div class="as">Next.js 14 · TypeScript · hosted on Vercel</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Layer 1 — Source Data (Excel + ODBC)</h3>
+  <p>
+    The company's dispatch system is a legacy application that exports data to Excel files via ODBC (a database connection protocol). These Excel files are the authoritative source for loads, driver schedules, terminal access cards, and site details. AutoRoute does not connect to the legacy system directly — it reads these files and works from there.
+  </p>
+  <p>
+    This approach means AutoRoute can be set up without IT access to the core dispatch database, and the legacy system continues operating unchanged alongside it.
+  </p>
+
+  <h3>Layer 2 — Database (Supabase)</h3>
+  <p>
+    Supabase is a hosted PostgreSQL database with a built-in REST API, authentication, and row-level security. It acts as the central hub that all parts of the system read from and write to. The sync script writes to it from the local PC; the FastAPI backend reads from it on every dispatch run; the frontend talks to it directly for authentication.
+  </p>
+  <p>
+    Choosing Supabase means there is no infrastructure to manage — backups, scaling, and connections are all handled by the service. The anon (public) key allows the frontend to authenticate users safely; the service role key (used only on the backend) bypasses row-level security for admin database operations.
+  </p>
+
+  <h3>Layer 3 — Backend API (FastAPI on Render)</h3>
+  <p>
+    The Python FastAPI backend is the brain of the system. It hosts the routing engine, validates all business logic, enforces authentication on every request, and exposes a clean REST API to the frontend. It runs as a single-process web server on Render. There are no background workers or job queues — every dispatch run is kicked off by a direct HTTP request and runs to completion synchronously (though results are persisted in the background so the user is not waiting).
+  </p>
+
+  <h3>Layer 4 — Frontend (Next.js on Vercel)</h3>
+  <p>
+    The frontend is the dispatcher's day-to-day interface. It is a React application built with Next.js that renders the dispatch board, driver list, load management screens, and all admin tools. It is a "thin" client — it does not contain any routing logic itself. All it does is fetch data from the API, display it, and send user actions (run dispatch, toggle attendance, drag a card) back to the API.
+  </p>
+
+  <h3>Key Design Decisions</h3>
+  <ul>
+    <li><strong>No microservices.</strong> A single FastAPI process handles everything. This keeps deployment, debugging, and local development simple. If the system needs to scale, the Render plan can be upgraded; there is no distributed system complexity to manage.</li>
+    <li><strong>Supabase as the integration bus.</strong> Both the sync script (running on a PC) and the API (running on Render) share the same database. This eliminates the need for any message queues, webhooks, or direct connections between components.</li>
+    <li><strong>Stateless routing engine.</strong> The engine loads all the data it needs from Supabase at the start of each run, computes the result entirely in memory, and writes it back. If the server restarts mid-run, no state is lost — the next run starts fresh. This makes the system very easy to reason about and debug.</li>
+    <li><strong>Frontend uses two Supabase clients.</strong> Authentication (login, session management) is handled directly between the browser and Supabase Auth. Business data (loads, drivers, dispatch results) flows through the FastAPI backend. This cleanly separates user identity from application logic.</li>
+  </ul>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     2. DATA FLOW
+══════════════════════════════════════════════ -->
+<div class="sec" id="dataflow">
+  <h2><span class="sn">02</span> Data Flow</h2>
+  <p class="sec-intro">
+    Understanding how data moves through the system is essential before diving into any individual component. There are three distinct data flows, each triggered by a different event: the background sync that keeps the database current, the dispatch run that produces assignments, and the board load that paints the dispatcher's screen.
+  </p>
+
+  <h3>Flow 1 — Sync (Runs Every 5 Minutes in the Background)</h3>
+  <p>
+    The sync script is a Python program running on a local Windows PC at the office. It watches a folder of Excel files and, every five minutes, reads each file and pushes its data into Supabase. This is the only way data gets into the database — the API never writes load orders or driver schedules itself, it only reads them.
+  </p>
+<pre>Excel file on disk
+  → copied to temp file (in case ODBC has the file locked)
+  → pandas reads the Excel sheet(s)
+  → transformer function normalizes column names, coerces types, deduplicates
+  → Supabase upsert in 500-row chunks
+  → result (rows upserted, duration, any error) written to sync_log table</pre>
+  <p>
+    The <code>load_details</code> table is special: the loads file has two sheets that must be combined before upserting. The <strong>Main</strong> sheet contains order data (what to deliver, where, when), and the <strong>Driver &amp; Terminal</strong> sheet contains live status updates from the legacy system (which driver is currently assigned, which terminal they loaded from). These two sheets are merged on <code>ce_id + product_name</code> before any data reaches the database.
+  </p>
+  <p>
+    To keep syncs fast, only loads from the past 60 days are processed. Historical data already in Supabase is left untouched.
+  </p>
+
+  <h3>Flow 2 — Dispatch Run (On-Demand, Triggered by a Dispatcher)</h3>
+  <p>
+    When a dispatcher clicks "Run Dispatch" in the browser, the frontend sends a <code>POST /api/dispatch/run</code> request to the backend API. The API then orchestrates the entire routing process:
+  </p>
+<pre>POST /api/dispatch/run  { dispatch_date: "2026-06-25", reroute: false }
+  ├─ Load yards, terminals, sites from Supabase (reference data)
+  ├─ Load active drivers for the date (attendance_expected = 1)
+  │    └─ Attach each driver's terminal access cards + site restrictions
+  ├─ Load all loads for dispatch_date ± 1 day
+  │    └─ Resolve terminal IDs by name; infer missing terminals from history
+  ├─ Clear the in-process travel time cache
+  ├─ Run RoutingEngine in a thread pool (so async event loop stays free)
+  │    ├─ Phase 1: Greedy assignment pass
+  │    ├─ Phase 2: Retry pass (timing-only failures)
+  │    └─ Phase 3: 2-opt local search improvement
+  ├─ Return result JSON to the frontend immediately
+  └─ Persist dispatch_results + unassigned_loads to Supabase [background]</pre>
+  <p>
+    The engine result is returned to the frontend immediately — the dispatcher sees the board update without waiting for the database write to complete. The background persistence task runs after the HTTP response is already sent.
+  </p>
+
+  <h3>Flow 3 — Board Load (Every Time the Date Changes or Page Loads)</h3>
+  <p>
+    The dispatch board is not just showing engine output — it combines three different data sources into a single unified view. When the frontend requests the board for a given date, the API:
+  </p>
+<pre>GET /api/dispatch?dispatch_date=2026-06-25
+  ├─ dispatch_results   — rows written by the routing engine for this date
+  ├─ pre_assigned loads — loads with status &gt; 1 (already in motion per ODBC),
+  │                       matched to driver names from driver_schedules
+  ├─ unassigned_loads   — loads the engine could not assign, with reasons
+  └─ load_details       — full metadata for all loads (paginated, up to 1000/page)
+
+  Frontend merges these four sources:
+  ├─ Pre-assigned loads appear at the top of their driver's column
+  ├─ Engine-assigned loads appear below, sorted by route_sequence
+  └─ Unassigned loads appear in a collapsible panel below the board</pre>
+  <p>
+    This design means the board shows a complete picture of the day whether or not the engine has been run yet. If a driver's loads already started before dispatch ran, they still appear correctly on the board — pulled from the ODBC data rather than engine output.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     3. DATABASE SCHEMA
+══════════════════════════════════════════════ -->
+<div class="sec" id="schema">
+  <h2><span class="sn">03</span> Database Schema</h2>
+  <p class="sec-intro">
+    The database has 12 tables grouped into four categories: reference data (the geographic and operational master data), driver data (schedules, access, and restrictions), load data (the delivery orders), and engine output (the results produced by each routing run). All tables live in a single Supabase project.
+  </p>
+
+  <h3>Reference Tables — The Geographic Master Data</h3>
+  <p>
+    These three tables are relatively static. They describe the physical locations in the system and are updated by the sync script from Excel, but rarely change day-to-day.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Table</th><th>Primary Key</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>yard_locations</code></td>
+        <td><code>yard</code> (text)</td>
+        <td>Each yard where drivers start and end their shift. Stores address, city, state, and lat/lon coordinates used to calculate drive-back-to-yard time.</td>
+      </tr>
+      <tr>
+        <td><code>terminal_locations</code></td>
+        <td><code>terminal_id</code> (int)</td>
+        <td>Fuel loading racks (terminals). Stores lat/lon for routing, plus an <code>is_diesel_wet</code> flag (0 or 1) that triggers the product sequencing rule described in the routing engine section.</td>
+      </tr>
+      <tr>
+        <td><code>site_details</code></td>
+        <td><code>site_id</code> (int)</td>
+        <td>Customer delivery locations. Stores lat/lon, the customer group name (used for group-level driver restrictions), and a <code>pump_certified</code> flag that controls which drivers are eligible for that site.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Driver Tables — Schedules, Access, and Restrictions</h3>
+  <p>
+    These three tables define everything the routing engine needs to know about a driver on a given day. They are updated daily by the sync script from the driver schedule Excel file, and can also be edited manually through the dashboard.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Table</th><th>Primary Key</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>driver_schedules</code></td>
+        <td><code>record_id</code> (int)</td>
+        <td>One row per driver per shift date. Contains the driver's name, yard, start time, board location (TX-AM etc.), shift length, pump training status, and most importantly <code>attendance_expected</code> — a 0/1 flag that dispatchers can toggle to mark a driver as present or absent for the day. Only drivers with <code>attendance_expected = 1</code> are included in the dispatch run.</td>
+      </tr>
+      <tr>
+        <td><code>driver_terminal_cards</code></td>
+        <td><code>(driver_id, terminal_id)</code></td>
+        <td>A junction table that records which fuel terminals a driver has a valid access card for. A driver can only be assigned a load at a terminal if a row exists here for their driver_id + that terminal_id. This is a hard constraint in the routing engine — no card, no assignment.</td>
+      </tr>
+      <tr>
+        <td><code>driver_restrictions</code></td>
+        <td><code>id</code> (serial)</td>
+        <td>Per-driver blacklists. Restrictions can be either site-level (a specific site_id the driver cannot deliver to) or customer-group-level (an entire customer group the driver cannot serve). Reasons might include past incidents, customer preferences, or equipment incompatibilities.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Load Table — The Delivery Orders</h3>
+  <p>
+    <code>load_details</code> is the most important table. It holds every fuel delivery order. Its primary key is <strong><code>(ce_id, product_name)</code></strong> — a composite key — because a single order can require multiple products (e.g. a station might need both Regular gasoline and Diesel in the same delivery). Each product in the order gets its own row in this table, but they all share the same CE ID.
+  </p>
+  <p>
+    The routing engine groups rows by CE ID and treats them as a single load. The combined set of products on a load determines whether diesel-wet sequencing rules apply.
+  </p>
+  <p>
+    Key columns include: <code>delivery_date</code>, <code>site_id</code>, <code>terminal_id</code>, <code>terminal_name</code>, <code>product_name</code>, <code>gross_gallons</code>, <code>window_start</code> / <code>window_end</code> (the customer's requested delivery window, or NULL for anytime deliveries), <code>load_status</code> (see below), and <code>first_name</code> / <code>last_name</code> (the driver currently assigned in the legacy ODBC system, used to populate the pre-assigned section of the dispatch board).
+  </p>
+
+  <h4>Load Status Values — The Lifecycle of a Delivery</h4>
+  <p>Each load has a numeric status that represents where it is in its lifecycle. This status is the key signal the routing engine and board use to decide how to handle each load:</p>
+  <div class="tw"><table>
+    <thead><tr><th>Status</th><th>Meaning</th><th>How AutoRoute Handles It</th></tr></thead>
+    <tbody>
+      <tr><td><code>1</code></td><td>Unscheduled</td><td style="color:var(--green)">Fully eligible for routing. The engine will try to assign this load to a driver.</td></tr>
+      <tr><td><code>2</code></td><td>Planned / Dispatched</td><td>Appears on the board as a "pre-assigned" card under its driver (from ODBC data). Not re-routed by the engine.</td></tr>
+      <tr><td><code>12</code></td><td>En Route to Rack</td><td style="color:var(--yellow)">🔒 Locked. In reroute mode this load stays on its assigned driver — it cannot be moved or reassigned.</td></tr>
+      <tr><td><code>20</code></td><td>At Rack (Loading)</td><td>Pre-assigned display only. Driver is physically at the terminal loading — cannot be changed.</td></tr>
+      <tr><td><code>22</code></td><td>En Route to Site</td><td>Pre-assigned display only. Load is in motion.</td></tr>
+      <tr><td><code>24</code></td><td>At Site (Unloading)</td><td>Pre-assigned display only. Delivery in progress.</td></tr>
+      <tr><td><code>26</code></td><td>Delivered</td><td>Pre-assigned display only. Delivery complete.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Engine Output Tables — What the Routing Run Produces</h3>
+  <p>
+    After each dispatch run, the engine writes its results into three tables. These are replaced on every new run for the same date (the previous run is marked inactive, not deleted, for audit purposes).
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Table</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>dispatch_results</code></td>
+        <td>One row per assigned stop. Stores the driver, sequence number, CE ID, terminal name, site name, ETA, drive times, and mileage. This is what the board reads to display driver columns.</td>
+      </tr>
+      <tr>
+        <td><code>unassigned_loads</code></td>
+        <td>One row per load the engine could not assign. Stores the CE ID, site name, and a human-readable failure reason (e.g. "No eligible terminal: Driver has no terminal access."). Shown in the unassigned panel on the board.</td>
+      </tr>
+      <tr>
+        <td><code>dispatch_runs</code></td>
+        <td>One row per engine execution. Audit log showing who ran it, when, how long it took, how many loads were assigned vs. unassigned, and whether it was a normal dispatch or a reroute. Only one run per date is marked <code>is_active = true</code> at a time.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Meta Tables</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Table</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>app_users</code></td>
+        <td>Application user accounts. Stores name, email, role (<code>user</code> or <code>administrator</code>), and active status. Connected to Supabase Auth by the same UUID. Administrators can manage other users from the dashboard.</td>
+      </tr>
+      <tr>
+        <td><code>sync_log</code></td>
+        <td>Every sync run writes a row here for each table it processed: how many rows were upserted, how long it took, and whether it succeeded or errored. Visible in the dashboard via the Sync Status indicator in the header.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Row-Level Security (RLS)</h3>
+  <p>
+    Supabase's row-level security lets you define access policies directly in the database, so even if someone obtained the anon key, they could only see data they are authorized to see. RLS is enabled on the five most sensitive tables: <code>app_users</code>, <code>dispatch_results</code>, <code>unassigned_loads</code>, <code>dispatch_runs</code>, and <code>driver_restrictions</code>.
+  </p>
+  <p>
+    The policies are straightforward: any authenticated user can read dispatch data; only users with the <code>administrator</code> role can read or modify user records. The backend API uses the service role key which bypasses RLS entirely — but this key is never exposed to the browser.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     4. SYNC PIPELINE
+══════════════════════════════════════════════ -->
+<div class="sec" id="sync">
+  <h2><span class="sn">04</span> Sync Pipeline</h2>
+  <p class="sec-intro">
+    The sync pipeline is what keeps AutoRoute's database current. It is a Python script that runs in the background on a local PC, reads six Excel files, and pushes their contents into Supabase every five minutes. Without this sync running, the routing engine would operate on stale data.
+  </p>
+
+  <div class="fmeta">
+    <div class="fmeta-row"><span class="fmeta-lbl">File</span><span class="fmeta-val"><code>sync/sync.py</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Runtime</span><span class="fmeta-val">Local Windows PC — Windows Task Scheduler or continuous loop (<code>python sync.py</code>)</span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Interval</span><span class="fmeta-val">300 seconds by default (configurable via <code>SYNC_INTERVAL_SECONDS</code> in <code>.env</code>)</span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Dependencies</span><span class="fmeta-val">pandas, openpyxl, supabase-py, python-dotenv</span></div>
+  </div>
+
+  <h3>Why Excel Files Instead of a Direct Database Connection?</h3>
+  <p>
+    The company's legacy dispatch system uses an internal proprietary database. Rather than requesting IT access to that database (which would require corporate approval, VPN configuration, and ongoing maintenance), AutoRoute reads the same Excel exports that dispatchers already use day-to-day. These files are automatically kept up-to-date via ODBC (a standard database connectivity protocol built into Windows), so the sync effectively piggybacks on an existing workflow.
+  </p>
+  <p>
+    This approach has one practical gotcha: ODBC sometimes keeps an Excel file locked open while it is refreshing it. To handle this, the sync script copies each file to a temporary location before reading it — so even if the source file is locked, the sync still gets the latest data.
+  </p>
+
+  <h3>Excel File to Supabase Table Mapping</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Excel File</th><th>Supabase Table</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>Yard_Locations.xlsx</code></td><td><code>yard_locations</code></td><td>Rarely changes. Synced on every cycle regardless.</td></tr>
+      <tr><td><code>terminal_locations.xlsx</code></td><td><code>terminal_locations</code></td><td>Must include the <code>is_diesel_wet</code> column (0 or 1).</td></tr>
+      <tr><td><code>site_details.xlsx</code></td><td><code>site_details</code></td><td>Large file (~thousands of sites). Paginated upsert.</td></tr>
+      <tr><td><code>Auto_Routing_Driver_Schedule.xlsx</code></td><td><code>driver_schedules</code></td><td>Updated daily. <code>board_location</code> is derived from <code>division_prefix + default_shift_name</code>.</td></tr>
+      <tr><td><code>Driver_terminal_cards.xlsx</code></td><td><code>driver_terminal_cards</code></td><td>Deduped on <code>(driver_id, terminal_id)</code> before upsert.</td></tr>
+      <tr><td><code>Loads Feed for Kim.xlsx</code></td><td><code>load_details</code></td><td>Two sheets (Main + Driver &amp; Terminal) merged before upsert. Only last 60 days processed.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>The Transformer Pipeline — How Raw Excel Becomes Clean Database Rows</h3>
+  <p>
+    Excel files from ODBC are messy. Column names have inconsistent casing, numeric values arrive as floats when the database expects integers, dates might be formatted as Excel serial numbers or as text strings, and some columns the database doesn't have appear in the file. Each table has a dedicated Python transformer function that normalizes all of this before the data reaches Supabase:
+  </p>
+  <ol>
+    <li><strong>Normalize column names</strong> — all headers lowercased and stripped. Renamed to match DB schema (e.g. <code>BillOfLading_ID</code> → <code>ce_id</code>).</li>
+    <li><strong>Coerce numeric types</strong> — non-numeric values (like <code>"T-75-TX-2664"</code> in a terminal_id column) are converted to <code>None</code> rather than crashing.</li>
+    <li><strong>Parse dates and datetimes</strong> — handles both Excel's internal serial number format (days since 1899-12-30) and ISO string format. All datetimes are stored timezone-naive in the database to avoid comparison issues in the engine.</li>
+    <li><strong>Apply domain rules</strong> — e.g. clamp <code>pump_certified</code> to exactly 0 or 1 (any other numeric value becomes 0); derive <code>board_location</code> by concatenating <code>division_prefix</code> and <code>default_shift_name</code>.</li>
+    <li><strong>Drop extra columns</strong> — any column not present in the DB schema is removed. This protects against ODBC adding new columns that would cause the upsert to fail.</li>
+    <li><strong>Deduplicate on primary key</strong> — within the same Excel file, if the same CE ID + product appears twice, keep only the last occurrence. This prevents batch ON CONFLICT errors.</li>
+  </ol>
+
+  <h3>Upsert Strategy and Load Protection</h3>
+  <p>
+    Records are pushed to Supabase using "upsert" — insert if new, update if already exists. Data is sent in chunks of 500 rows to stay within Supabase's request size limits.
+  </p>
+  <p>
+    There is one important protection for load data: if a load row already exists in Supabase with <code>load_status = 1</code> (meaning a dispatcher has manually marked it as "ready to route"), the sync skips that row and does not overwrite it with whatever the ODBC file says. This prevents the source system from accidentally resetting loads that are staged for routing.
+  </p>
+
+  <h3>Error Handling and Reliability</h3>
+  <p>
+    If one table's sync fails (e.g. a malformed Excel file), the error is logged to <code>sync_log</code> and the script moves on to the next table. A single bad file does not stop all other tables from syncing. The sync status indicator in the dashboard header shows the timestamp of the last successful sync, so dispatchers can immediately tell if the data is fresh or stale.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     5. BACKEND API
+══════════════════════════════════════════════ -->
+<div class="sec" id="api">
+  <h2><span class="sn">05</span> Backend API</h2>
+  <p class="sec-intro">
+    The backend is a Python web server built with FastAPI. It is the only component that runs the routing engine, and it is the gatekeeper for all data modifications — every action a dispatcher takes in the browser goes through this API. All endpoints require a valid Supabase JWT, so unauthenticated requests are rejected before any business logic runs.
+  </p>
+
+  <div class="fmeta">
+    <div class="fmeta-row"><span class="fmeta-lbl">File</span><span class="fmeta-val"><code>backend/api/main.py</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Framework</span><span class="fmeta-val">FastAPI 0.115 · Python 3.12 · Uvicorn ASGI server</span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Auth</span><span class="fmeta-val">Every request must include <code>Authorization: Bearer &lt;supabase_jwt&gt;</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Hosting</span><span class="fmeta-val">Render Web Service (Starter plan, $7/mo)</span></div>
+  </div>
+
+  <h3>How Authentication Works</h3>
+  <p>
+    When a user logs into the dashboard, Supabase Auth returns a JWT (JSON Web Token). The frontend stores this token in memory and attaches it to every API request as a Bearer token. The FastAPI backend's <code>verify_token</code> dependency function calls <code>supabase.auth.get_user(token)</code> to validate the token — if invalid or expired, the request is rejected with a 401. This means the backend never stores passwords or manages sessions; that is all handled by Supabase.
+  </p>
+
+  <h3>Complete Endpoint Reference</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Method</th><th>Path</th><th>What It Does</th></tr></thead>
+    <tbody>
+      <tr><td><span class="m GET">GET</span></td><td><code>/health</code></td><td>Returns <code>{"status":"ok"}</code>. Used by uptime monitors to keep the Render instance warm.</td></tr>
+      <tr><td><span class="m POST">POST</span></td><td><code>/api/dispatch/run</code></td><td>Triggers a full routing engine run for the given date. Returns assignments + unassigned loads immediately; persists to database in the background.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/dispatch</code></td><td>Fetches the dispatch board for a date: engine results, pre-assigned in-progress loads, unassigned loads, and full load metadata.</td></tr>
+      <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/dispatch/{ce_id}/resequence</code></td><td>Moves a load to a different driver or sequence position. Called when a dispatcher drags a card on the board.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/loads</code></td><td>Returns all loads for a given date from <code>load_details</code>.</td></tr>
+      <tr><td><span class="m POST">POST</span></td><td><code>/api/loads</code></td><td>Adds or updates a load. Used to manually enter a load not in the ODBC system.</td></tr>
+      <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/loads/{ce_id}</code></td><td>Removes a load from the system entirely.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/drivers</code></td><td>Returns driver schedule rows for a given date, used to populate the Drivers tab.</td></tr>
+      <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/drivers/{driver_id}/attendance</code></td><td>Toggles a driver's <code>attendance_expected</code> flag for a specific date.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/terminal-access</code></td><td>Returns all driver terminal card records.</td></tr>
+      <tr><td><span class="m POST">POST</span></td><td><code>/api/terminal-access</code></td><td>Grants a driver access to a terminal (inserts into <code>driver_terminal_cards</code>).</td></tr>
+      <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/terminal-access</code></td><td>Revokes a driver's access to a terminal.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/restrictions</code></td><td>Returns all driver restriction records.</td></tr>
+      <tr><td><span class="m POST">POST</span></td><td><code>/api/restrictions</code></td><td>Adds a new site or customer-group restriction for a driver.</td></tr>
+      <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/restrictions/{id}</code></td><td>Removes a restriction by its database ID.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/terminals</code></td><td>Returns all terminal location records.</td></tr>
+      <tr><td><span class="m POST">POST</span></td><td><code>/api/terminals</code></td><td>Adds or updates a terminal record.</td></tr>
+      <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/terminals/{id}</code></td><td>Deletes a terminal record.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/sites</code></td><td>Returns all site detail records.</td></tr>
+      <tr><td><span class="m GET">GET</span></td><td><code>/api/sync/status</code></td><td>Returns the 20 most recent <code>sync_log</code> entries, used to power the Sync Status indicator in the header.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>The Dispatch Run in Detail</h3>
+  <p>
+    The most important endpoint is <code>POST /api/dispatch/run</code>. It accepts two parameters: <code>dispatch_date</code> (a date string like <code>2026-06-25</code>) and <code>reroute</code> (true or false).
+  </p>
+  <ul>
+    <li><strong>Normal dispatch (<code>reroute: false</code>):</strong> Used at the start of the day. Routes all loads with status ≤ 1 (unscheduled). Any previous dispatch results for the same date are marked inactive and replaced.</li>
+    <li><strong>Reroute (<code>reroute: true</code>):</strong> Used mid-day when something has changed — a new urgent load came in, a driver called in sick, or a previous assignment turned out to be wrong. The engine first "seeds" the solution with loads that are already in motion (status 12 = en route to rack), locking them to their current driver. Then it re-routes all remaining unstarted loads around those locked assignments.</li>
+  </ul>
+  <p>
+    The routing engine itself is synchronous Python code — it does not use async/await. To run it inside the async FastAPI server without blocking the event loop, it is dispatched to a thread pool via <code>asyncio.run_in_executor(None, engine.run)</code>. This also ensures the engine's own travel time lookups can create fresh event loops internally, which is needed for the Google Maps API calls to work correctly from a worker thread.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     6. ROUTING ENGINE
+══════════════════════════════════════════════ -->
+<div class="sec" id="engine">
+  <h2><span class="sn">06</span> Routing Engine</h2>
+  <p class="sec-intro">
+    The routing engine is the heart of AutoRoute. Given a set of drivers and loads for a day, it produces the best possible assignment of loads to drivers, taking into account dozens of real-world constraints and trying to minimize wasted empty miles across the entire fleet. This section explains how the algorithm works, step by step.
+  </p>
+
+  <div class="fmeta">
+    <div class="fmeta-row"><span class="fmeta-lbl">File</span><span class="fmeta-val"><code>backend/engine/routing_engine.py</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Class</span><span class="fmeta-val"><code>RoutingEngine</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Algorithm</span><span class="fmeta-val">Greedy assignment → retry pass → 2-opt local search</span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Score function</span><span class="fmeta-val"><code>total_empty_miles − total_loaded_miles</code> (lower = better; rewards loaded driving, penalises deadhead)</span></div>
+  </div>
+
+  <h3>What "Optimization" Means Here</h3>
+  <p>
+    The engine is trying to minimize <em>empty miles</em> — miles driven without fuel on board (deadhead). Every mile a driver spends driving to a terminal without a load, or returning to the yard at the end of the day, is a cost. The algorithm scores each possible assignment using <code>empty_miles − loaded_miles</code>: a lower (more negative) score means more loaded driving relative to empty driving, which is better.
+  </p>
+  <p>
+    This is a variant of the classic Vehicle Routing Problem (VRP), which is computationally hard in the general case. Rather than trying every possible combination (which would take hours for 15 drivers and 100 loads), the engine uses a fast greedy heuristic to get a good initial solution, then improves it through local search.
+  </p>
+
+  <h3>Input: What the Engine Receives</h3>
+  <p>
+    Before the engine runs, the data loader fetches everything it needs from Supabase:
+  </p>
+  <ul>
+    <li><strong>Drivers</strong> — only those with <code>attendance_expected = 1</code> for the dispatch date. Each driver object carries their yard location, start time, max shift hours, pump training status, terminal access card set, and restriction sets.</li>
+    <li><strong>Loads</strong> — all loads for dispatch_date ± 1 day, filtered to status ≤ 1. Each load has its site and terminal resolved from the reference dictionaries. Loads with missing site or terminal data are immediately placed in the unassigned list with an explanatory reason.</li>
+    <li><strong>Reference dictionaries</strong> — sites, terminals, and yards, keyed by their IDs for fast lookup.</li>
+  </ul>
+
+  <h3>Phase 1 — Greedy Assignment</h3>
+  <p>
+    The first phase processes loads one at a time in priority order. The goal is to quickly produce a complete, feasible solution even if it is not yet optimal.
+  </p>
+  <p><strong>Load priority order:</strong></p>
+  <ol>
+    <li>Loads with a specific delivery time window (timed deliveries) come before loads with no window (anytime deliveries). A gas station that needs fuel between 8 AM and 10 AM is harder to schedule than one with no preference — it gets first pick of drivers.</li>
+    <li>Among timed loads, earlier delivery dates come first.</li>
+    <li>Among same-date timed loads, earlier window start times come first.</li>
+  </ol>
+  <p><strong>For each load:</strong> Drivers are tried in order of least current work (fewest stops already assigned, then earliest finish time — so the lightest drivers get first shot at new work). For each driver, every possible insertion position in their existing route is tried (before their first stop, between stops, after their last stop). The position that produces the best score is accepted — but only if the full route simulation passes all constraints.</p>
+  <p>
+    If no driver can take the load at any position without violating a constraint or shift limit, the load is added to the unassigned list along with the most informative failure reason.
+  </p>
+
+  <h3>Phase 2 — Retry Pass</h3>
+  <p>
+    After the greedy pass, some loads may be unassigned simply because every driver's shift was slightly too full at the time that load was tried — not because of any hard rule violation. The 2-opt pass in Phase 3 often reshuffles routes enough to free up capacity. But rather than running 2-opt blind and hoping it frees the right slots, the retry pass gives timing-only failures a dedicated second chance.
+  </p>
+  <p>
+    Loads that failed exclusively with the reason "Shift time exceeded" are collected and retried against drivers sorted by finish time (lightest workload first). Any load that finds a slot now is accepted and added to the solution before 2-opt begins.
+  </p>
+
+  <h3>Phase 3 — 2-opt Local Search</h3>
+  <p>
+    After Phases 1 and 2 produce an initial complete assignment, the 2-opt pass iterates over all pairs of drivers and tries to improve the solution by making small swaps and moves:
+  </p>
+  <div class="phases">
+    <div class="ph">
+      <div class="phn">A</div>
+      <div class="pt">SWAP — Exchange one load between two drivers</div>
+      <p>For every pair of drivers A and B, try swapping every non-locked load on A's route with every non-locked load on B's route. If the combined score of both routes improves by more than 0.01 miles, accept the swap and update both routes. Then continue checking this driver pair with the updated routes.</p>
+    </div>
+    <div class="ph">
+      <div class="phn">B</div>
+      <div class="pt">MOVE — Relocate one load from one driver to another</div>
+      <p>For every non-locked load on driver A's route, try inserting it into every possible position on driver B's route (as long as B has fewer than 4 stops). If moving the load reduces the combined empty miles of both routes, accept the move. This is particularly effective when one driver is far from a load's terminal and another driver is nearby.</p>
+    </div>
+  </div>
+  <p>
+    The loop repeats — trying all pairs again with the updated assignments — until a full pass produces no improvements, or 200 iterations are reached (a safety cap to prevent runaway compute on unusual data). In practice, the engine converges in 3–10 iterations for a typical day.
+  </p>
+  <p>
+    Loads with locked statuses (status 12 = en route to rack, status 20 = at rack) are never touched by the 2-opt pass. You cannot pull a driver off a load they are already physically loading.
+  </p>
+
+  <h3>Route Simulation — How the Engine Checks Feasibility</h3>
+  <p>
+    Before accepting any assignment, the engine simulates the full timeline for a driver with their proposed list of stops. This <code>_simulate_route</code> function is called thousands of times per dispatch run. It walks through each stop in sequence:
+  </p>
+<pre>Starting at driver's yard at shift start time:
+
+  For each stop (load assignment):
+    1. Calculate drive time from current position to terminal
+       → Uses Google Maps API (with 20% tanker multiplier) or haversine fallback
+    2. Arrive at terminal. Check: does driver arrive before shift end?
+    3. Load service time: 30 minutes at terminal
+    4. Calculate drive time from terminal to delivery site
+    5. Arrive at site. Apply delivery window logic:
+       ├─ If arriving more than 2 hours early → wait at staging area
+       ├─ If arriving up to 1 hour late → allowed (grace period)
+       └─ If arriving more than 1 hour late → simulation FAILS (window missed)
+    6. Unload service time: 45 minutes at site
+    7. Update current position and time to end of this stop
+
+  After all stops:
+    8. Calculate drive time from last site back to yard
+    9. Check: does driver return before shift end?
+       If not → simulation FAILS (shift exceeded)
+
+Returns: complete DriverRoute object with ETAs for every stop,
+         or None if any constraint was violated</pre>
+  <p>
+    If <code>_simulate_route</code> returns <code>None</code>, that insertion is infeasible. The engine tries the next position, the next driver, until all options are exhausted.
+  </p>
+
+  <h3>Hard Constraints — Rules That Can Never Be Violated</h3>
+  <p>
+    These are checked before simulating a route. If any hard constraint fails, the driver is immediately skipped for that load:
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Constraint</th><th>What It Checks</th><th>Where in Code</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Terminal card access</td>
+        <td>The load requires terminal X. Does this driver have a row in <code>driver_terminal_cards</code> for terminal X? If not, they cannot pick up the load.</td>
+        <td><code>_check_driver_eligible</code></td>
+      </tr>
+      <tr>
+        <td>Pump certification</td>
+        <td>The delivery site has <code>pump_certified = 1</code>. Does this driver have <code>pump_trained = 1</code>? Uncertified drivers cannot deliver to pump-required sites.</td>
+        <td><code>_check_driver_eligible</code></td>
+      </tr>
+      <tr>
+        <td>Site restriction</td>
+        <td>Is the load's site_id in this driver's <code>restricted_site_ids</code> set? If so, the driver cannot be assigned to this site.</td>
+        <td><code>_check_driver_eligible</code></td>
+      </tr>
+      <tr>
+        <td>Customer group restriction</td>
+        <td>Is the site's customer group name in this driver's <code>restricted_customer_groups</code> set? If so, blocked even if the specific site is not individually restricted.</td>
+        <td><code>_check_driver_eligible</code></td>
+      </tr>
+      <tr>
+        <td>Diesel-wet sequencing</td>
+        <td>If the load is at a diesel-wet terminal, the previous load on this driver's route must contain diesel and must NOT contain gasoline or dyed fuel. This reflects real tanker compartment contamination rules.</td>
+        <td><code>_check_diesel_wet_sequence</code></td>
+      </tr>
+      <tr>
+        <td>Shift time</td>
+        <td>The driver must be able to complete all stops and return to their yard before their shift ends.</td>
+        <td><code>_simulate_route</code> (returns None)</td>
+      </tr>
+      <tr>
+        <td>Delivery window</td>
+        <td>If the load has a time window, the driver must arrive within the tolerance (up to 2 hours early, up to 1 hour late).</td>
+        <td><code>_simulate_route</code> (returns None)</td>
+      </tr>
+      <tr>
+        <td>Max 4 stops per driver</td>
+        <td>A driver's route cannot exceed 4 loads. This is a practical limit based on typical shift lengths.</td>
+        <td>Greedy loop guard</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Unassigned Reason Priority</h3>
+  <p>
+    When a load cannot be assigned, the engine has often accumulated multiple failure reasons — one per driver tried. For example, Driver A failed due to "no terminal access", Driver B failed due to "shift exceeded", and Driver C failed due to "pump cert required". Showing all reasons would be confusing.
+  </p>
+  <p>
+    Instead, the engine picks the single most informative reason using a fixed priority ranking. Hard structural blockers (terminal access, pump certification, site restrictions) rank higher than soft timing failures. So if even one driver was blocked by a terminal access issue, that becomes the displayed reason — because fixing it (granting the driver a terminal card) would potentially unlock the load, whereas "shift exceeded" just means a driver was busy.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     7. GEO & TRAVEL TIME
+══════════════════════════════════════════════ -->
+<div class="sec" id="geo">
+  <h2><span class="sn">07</span> Geo &amp; Travel Time</h2>
+  <p class="sec-intro">
+    Accurate travel time estimates are critical for route feasibility. A route that looks fine on a map might actually violate a driver's shift limit once real-world traffic is taken into account. AutoRoute uses Google Maps for live traffic-aware estimates, with a built-in fallback and intelligent caching to control API costs.
+  </p>
+
+  <div class="fmeta">
+    <div class="fmeta-row"><span class="fmeta-lbl">File</span><span class="fmeta-val"><code>backend/engine/geo.py</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Primary fn</span><span class="fmeta-val"><code>get_travel_mins_sync(lat1, lon1, lat2, lon2, departure_epoch)</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Fallback</span><span class="fmeta-val">Haversine (straight-line) distance at 50 mph constant speed</span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Multiplier</span><span class="fmeta-val">All results ×1.20 — accounts for tanker truck speed vs. passenger car baseline</span></div>
+  </div>
+
+  <h3>Distance Calculation — Haversine Formula</h3>
+  <p>
+    The haversine formula calculates the great-circle distance between two latitude/longitude points on the Earth's surface. It is used as both a fallback travel time estimate (at 50 mph) and to calculate loaded and empty mileage figures shown on the dispatch board.
+  </p>
+  <p>
+    Earth radius used: 3958.8 miles. The function is <code>haversine_miles(lat1, lon1, lat2, lon2)</code>.
+  </p>
+  <div class="note tip"><span class="ni">💡</span><p>Haversine gives straight-line distance, not road distance. Road distance is typically 15–25% longer. This is partially offset by the 20% tanker multiplier — so haversine-only mode is a rough but usable fallback, not a precise estimate.</p></div>
+
+  <h3>Google Maps Routes API</h3>
+  <p>
+    When a Google Maps API key is configured, the engine uses the Routes API v2 (<code>computeRoutes</code> endpoint) to get traffic-aware driving durations. The request specifies <code>DRIVE</code> mode, <code>TRAFFIC_AWARE</code> routing preference, and avoids ferries. It passes the expected departure time so Google can use traffic predictions appropriate for that time of day.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Parameter</th><th>Value / Behavior</th></tr></thead>
+    <tbody>
+      <tr><td>Endpoint</td><td><code>https://routes.googleapis.com/directions/v2:computeRoutes</code></td></tr>
+      <tr><td>Travel mode</td><td>DRIVE · TRAFFIC_AWARE · ferries avoided</td></tr>
+      <tr><td>Field mask</td><td><code>routes.duration,routes.distanceMeters</code> — only request what's needed to minimize response size and billing</td></tr>
+      <tr><td>Departure time</td><td>Passed as an RFC3339 UTC timestamp. If the departure time is in the past (which can happen on a reroute), it is omitted and Google uses current-time traffic.</td></tr>
+      <tr><td>Timeout</td><td>8 seconds per call. If Google does not respond in time, the call fails gracefully and the haversine fallback is used for that leg.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>The 20% Tanker Multiplier</h3>
+  <p>
+    Google Maps estimates driving times based on typical passenger cars. A fully loaded fuel tanker is a heavy commercial vehicle that takes longer to accelerate, must maintain greater following distances, and cannot match car speeds on ramps and surface streets. Based on real-world observation of actual vs. estimated times, AutoRoute applies a flat 20% increase to every travel time estimate — whether it came from Google Maps or haversine.
+  </p>
+  <p>
+    This multiplier is stored as a single constant (<code>TANKER_TRAVEL_MULTIPLIER = 1.20</code>) in <code>geo.py</code>. If operational data shows the figure should be adjusted, changing this one value updates all route simulations.
+  </p>
+
+  <h3>Caching — Staying Within Google's Free Quota</h3>
+  <p>
+    A typical dispatch run with 15 drivers and 4 stops each involves about 120 travel legs (yard → terminal, terminal → site, for each stop). Without caching, that would be 120 Google Maps API calls per run. Google's free tier is 100 requests/day.
+  </p>
+  <p>
+    The solution is an in-process cache (a Python dictionary) that stores results for the lifetime of the dispatch run. The cache key is:
+  </p>
+<pre>(round(lat1, 4), round(lon1, 4), round(lat2, 4), round(lon2, 4), departure_epoch // 900)</pre>
+  <p>
+    <strong>Coordinate rounding to 4 decimal places</strong> gives ~11 meter precision. Since terminals and sites have fixed locations, two drivers heading to the same terminal from the same area will get the same cache entry, even if their exact starting coordinates differ slightly.
+  </p>
+  <p>
+    <strong>15-minute departure time buckets</strong> (<code>epoch // 900</code>) means drivers leaving within the same 15-minute window share a cached result. Traffic does not meaningfully change within 15 minutes on Texas highways, so this is a safe approximation.
+  </p>
+  <p>
+    In practice, most terminal→site legs repeat across many drivers (e.g. 8 drivers all going to the same Shell station from the same Dallas rack). With caching, a typical run makes only 20–30 real API calls — well within the free quota. The cache is cleared at the start of each new dispatch run so stale results from a prior run never carry over.
+  </p>
+
+  <h3>Threading Considerations</h3>
+  <p>
+    The routing engine is synchronous code running in a thread pool executor (not the FastAPI async event loop). The Google Maps call is an async HTTP request. To bridge this, <code>get_travel_mins_sync</code> creates a brand new event loop (<code>asyncio.new_event_loop()</code>), runs the async call to completion inside it, then closes the loop. This is intentional — reusing the FastAPI event loop from a worker thread would cause errors in Python 3.10+.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     8. FRONTEND APPLICATION
+══════════════════════════════════════════════ -->
+<div class="sec" id="frontend">
+  <h2><span class="sn">08</span> Frontend Application</h2>
+  <p class="sec-intro">
+    The frontend is the dispatcher's primary interface. It is a web application built with Next.js and TypeScript, hosted on Vercel. It presents the dispatch board, driver attendance, load management, terminal access, and user administration — all in a dark-themed, data-dense layout designed for daily professional use.
+  </p>
+
+  <div class="fmeta">
+    <div class="fmeta-row"><span class="fmeta-lbl">Framework</span><span class="fmeta-val">Next.js 14 (App Router) · TypeScript · Tailwind CSS</span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Key libraries</span><span class="fmeta-val"><code>@dnd-kit/core</code> (drag-and-drop) · <code>date-fns</code> (date formatting) · <code>@supabase/supabase-js</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Hosting</span><span class="fmeta-val">Vercel (free tier). Deploys automatically on push to <code>main</code>.</span></div>
+  </div>
+
+  <h3>Application Structure</h3>
+  <p>The app has two pages:</p>
+  <ul>
+    <li><strong><code>/</code> (Login)</strong> — A centered card with email/password fields. On submit, calls <code>supabase.auth.signInWithPassword</code>. On success, redirects to <code>/dashboard</code>. If the user is already logged in, they are redirected immediately.</li>
+    <li><strong><code>/dashboard</code></strong> — The main application. Protected — unauthenticated users are redirected to <code>/</code>. Contains the header, tab navigation, and all six tabs.</li>
+  </ul>
+
+  <h3>Dashboard Layout</h3>
+  <p>
+    The dashboard is structured as a sticky header + tab nav bar + scrollable tab content area. The header shows the AutoRoute brand, a date picker (controls which day all date-sensitive tabs are loaded for), a sync status indicator, the logged-in user's name, and a sign-out button.
+  </p>
+<pre>┌──────────────────────────────────────────────────────────────────────┐
+│  🚛 AutoRoute  │  Date: [2026-06-25] [Today]  │  ●Synced 2min ago  │
+├──────────────────────────────────────────────────────────────────────┤
+│  🗂 Dispatch Board  │  📦 Loads  │  👤 Drivers  │  ⛽ Terminal  │ ...│
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   Active Tab Content                                                 │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘</pre>
+
+  <h3>Dispatch Board Tab — The Core Feature</h3>
+  <p>
+    The dispatch board is the most complex component in the application. It shows a kanban-style view of drivers as columns and their assigned loads as cards within each column.
+  </p>
+  <p>
+    When the tab loads (or the date changes), it calls <code>GET /api/dispatch</code> and builds the board from the combined response. Drivers are grouped into sub-tabs by board location (TX-AM, TX-PM, FW-AM, FW-PM, ET-AM). Within each board location, drivers are sorted alphabetically by last name.
+  </p>
+  <p>Each load is rendered as a <strong>LoadCard</strong> showing:</p>
+  <ul>
+    <li>Customer name, site name, and city</li>
+    <li>Delivery time window (or "Anytime")</li>
+    <li>Terminal name and product type</li>
+    <li>ETA (if assigned by the engine)</li>
+    <li>CE ID and order number</li>
+    <li>A color-coded status dot indicating the load's current lifecycle state</li>
+    <li>A sequence number badge (1, 2, 3, 4) showing where the load falls in the driver's route</li>
+  </ul>
+  <p><strong>Key dispatcher interactions:</strong></p>
+  <ul>
+    <li><strong>Run Dispatch</strong> — Calls <code>POST /api/dispatch/run</code> with <code>reroute: false</code>. Board refreshes automatically when the run completes.</li>
+    <li><strong>Reroute</strong> — Calls the same endpoint with <code>reroute: true</code>. Loads in progress are locked; others are re-optimized.</li>
+    <li><strong>Drag-and-drop resequencing</strong> — Load cards are draggable using <code>@dnd-kit</code>. Dragging a card within a driver's column reorders it; dragging it to another driver's column reassigns it. On drop, the frontend updates the board optimistically and calls <code>PATCH /api/dispatch/{ce_id}/resequence</code> to persist the change.</li>
+    <li><strong>Undo</strong> — Before each Run or Reroute, the current board state is saved to a local history array. Clicking Undo restores the board to its previous local state (frontend-only; does not undo database writes).</li>
+    <li><strong>Unassigned panel</strong> — Click the red "✗ N Unassigned" button to expand a panel listing every load the engine could not place, along with the reason why.</li>
+    <li><strong>Search</strong> — Filter visible loads by CE ID, site name, or order number. Helpful on busy boards with 50+ loads.</li>
+  </ul>
+
+  <h3>Load Status Color Coding</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Status</th><th>Color</th><th>What It Means Visually</th></tr></thead>
+    <tbody>
+      <tr><td>Unscheduled / Dispatched</td><td style="color:#6b7280">● Gray</td><td>Not yet started</td></tr>
+      <tr><td>En Route to Rack</td><td style="color:#f97316">● Orange</td><td>Driver is heading to the terminal</td></tr>
+      <tr><td>At Rack</td><td style="color:#eab308">● Yellow</td><td>Driver is loading fuel</td></tr>
+      <tr><td>En Route to Site</td><td style="color:#1d4ed8">● Blue</td><td>Driver is on the road, fuel on board</td></tr>
+      <tr><td>At Site</td><td style="color:#16a34a">● Green</td><td>Driver is unloading at the customer</td></tr>
+      <tr><td>Delivered</td><td style="color:#0d9488">● Teal</td><td>Delivery complete</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Other Tabs</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Tab</th><th>What It Shows</th><th>Key Actions</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Loads</strong></td>
+        <td>Table of all loads for the selected date, one row per CE ID</td>
+        <td>Search by CE ID / site / order number; remove individual loads</td>
+      </tr>
+      <tr>
+        <td><strong>Drivers</strong></td>
+        <td>All drivers scheduled for the selected date, grouped by board location with summary stats</td>
+        <td>Toggle attendance (Working / Not Working) for each driver</td>
+      </tr>
+      <tr>
+        <td><strong>Terminal Access</strong></td>
+        <td>Which drivers have access cards for which terminals, grouped by terminal</td>
+        <td>Add access (by driver ID + terminal ID); remove individual access records; delete terminals</td>
+      </tr>
+      <tr>
+        <td><strong>Restrictions</strong></td>
+        <td>All driver site and customer-group restrictions in a table</td>
+        <td>Add restriction (site or customer type); remove by row</td>
+      </tr>
+      <tr>
+        <td><strong>Users</strong> (Admin only)</td>
+        <td>All application user accounts with roles and active status</td>
+        <td>Change role (User / Administrator); activate or deactivate accounts</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>API Client (<code>lib/api.ts</code>)</h3>
+  <p>
+    All calls from the frontend to the FastAPI backend go through a single typed wrapper module. It automatically retrieves the current Supabase session token, attaches it as a Bearer header, and throws a meaningful error (using the API's <code>detail</code> field) if the response is not a 2xx. This means tab components never deal with auth headers directly — they just call functions like <code>api.runDispatch(date)</code>.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     9. AUTH & AUTHORIZATION
+══════════════════════════════════════════════ -->
+<div class="sec" id="authz">
+  <h2><span class="sn">09</span> Authentication &amp; Authorization</h2>
+  <p class="sec-intro">
+    AutoRoute uses Supabase Auth for user identity. Authentication is handled entirely by Supabase — the application does not store passwords, implement session logic, or manage JWTs directly. Authorization (what a logged-in user is allowed to do) is enforced at two levels: the frontend hides admin-only UI elements, and the database enforces row-level security policies as a safety net.
+  </p>
+
+  <h3>How Login Works — Full Token Flow</h3>
+  <p>
+    Here is exactly what happens when a dispatcher signs in:
+  </p>
+  <ol>
+    <li>User enters email + password in the login form and clicks "Sign in".</li>
+    <li>The frontend calls <code>supabase.auth.signInWithPassword({ email, password })</code> directly — this request goes to Supabase, not to the FastAPI backend.</li>
+    <li>Supabase validates the credentials and returns a <strong>JWT access token</strong> and a refresh token.</li>
+    <li>The <code>useAuth</code> hook detects the new session via <code>supabase.auth.onAuthStateChange</code> and calls <code>fetchAppUser</code>, which queries the <code>app_users</code> table to retrieve the user's full name and role.</li>
+    <li>The user is redirected to <code>/dashboard</code>. From this point on, every API call attaches the JWT as an <code>Authorization: Bearer</code> header.</li>
+    <li>On the backend, the <code>verify_token</code> FastAPI dependency intercepts every request, calls <code>supabase.auth.get_user(token)</code> with the anon key to validate the JWT, and injects the user object into the route handler. If the token is missing, expired, or tampered with, a 401 is returned immediately.</li>
+  </ol>
+<pre>Browser                   Supabase Auth              FastAPI Backend
+   │                            │                           │
+   │  signInWithPassword()  ─►  │                           │
+   │  ◄── JWT access_token ─── │                           │
+   │                            │                           │
+   │  GET /api/dispatch  ──────────────────────────────► │
+   │    Header: Authorization: Bearer &lt;JWT&gt;               │
+   │                            │  ◄── get_user(JWT) ─── │
+   │                            │ ──── user object ──────► │
+   │  ◄── dispatch board data ─────────────────────────── │</pre>
+
+  <h3>The Two Supabase Keys — And Why Both Exist</h3>
+  <p>
+    Supabase provides two API keys for every project, and AutoRoute uses both for different purposes:
+  </p>
+  <ul>
+    <li><strong>Anon key</strong> (<code>SUPABASE_ANON_KEY</code>) — A public-safe key that is embedded in the frontend code (prefixed <code>NEXT_PUBLIC_</code>). It is safe to expose because Supabase's row-level security policies govern what this key can access. The backend also uses this key specifically for <code>get_user(token)</code> calls — validating a JWT does not require elevated privileges.</li>
+    <li><strong>Service role key</strong> (<code>SUPABASE_SERVICE_KEY</code>) — A secret key that bypasses all row-level security. Used only in the backend API and sync script, never exposed to the browser. Required for operations like upserting thousands of sync rows or deleting old dispatch results.</li>
+  </ul>
+
+  <h3>Role Model</h3>
+  <p>
+    There are exactly two roles, stored in <code>app_users.role</code>:
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Role</th><th>What This User Can Do</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>user</code></td>
+        <td>View all tabs (Dispatch Board, Loads, Drivers, Terminal Access, Restrictions). Run dispatch and reroute. Toggle driver attendance. Add/remove terminal access records and restrictions. Cannot see the Users tab.</td>
+      </tr>
+      <tr>
+        <td><code>administrator</code></td>
+        <td>Everything a user can do, plus: view and manage the Users tab (invite users, change roles, activate/deactivate accounts). Shown with an "ADMIN" badge in the header.</td>
+      </tr>
+    </tbody>
+  </table></div>
+  <p>
+    Role enforcement happens in two places: the frontend hides the Users tab for non-admins, and the Users tab component itself checks the role on render and shows "Access denied" as a fallback if the frontend check is somehow bypassed. Database-level RLS adds a third enforcement layer.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     10. DEPLOYMENT
+══════════════════════════════════════════════ -->
+<div class="sec" id="deploy">
+  <h2><span class="sn">10</span> Deployment</h2>
+  <p class="sec-intro">
+    AutoRoute runs across four separate services, each with a distinct hosting environment. Understanding which service does what — and how they connect — is important for operations, troubleshooting, and scaling decisions.
+  </p>
+
+  <h3>Infrastructure at a Glance</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Component</th><th>Service</th><th>Plan</th><th>Approx. Cost</th><th>Managed By</th></tr></thead>
+    <tbody>
+      <tr><td>PostgreSQL Database</td><td>Supabase Cloud</td><td>Free / Pro</td><td>$0–$25/mo</td><td>Supabase</td></tr>
+      <tr><td>Python Backend API</td><td>Render Web Service</td><td>Starter</td><td>~$7/mo</td><td>Render</td></tr>
+      <tr><td>Next.js Frontend</td><td>Vercel</td><td>Free (Hobby)</td><td>$0</td><td>Vercel</td></tr>
+      <tr><td>Excel → Supabase Sync</td><td>Local Windows PC</td><td>—</td><td>—</td><td>Office IT / scheduler</td></tr>
+      <tr><td>Source Code</td><td>GitHub</td><td>Free</td><td>$0</td><td>Dev team</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Backend — Render Web Service</h3>
+  <p>
+    The FastAPI backend is deployed on Render as a standard web service. The <code>render.yaml</code> file in the repository root fully describes the service configuration, so connecting the GitHub repo to Render will auto-populate all settings.
+  </p>
+  <div class="fmeta">
+    <div class="fmeta-row"><span class="fmeta-lbl">Build</span><span class="fmeta-val"><code>pip install -r backend/requirements.txt</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Start</span><span class="fmeta-val"><code>uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT</code></span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Health check</span><span class="fmeta-val"><code>GET /health</code> — returns 200 when the server is up</span></div>
+    <div class="fmeta-row"><span class="fmeta-lbl">Region</span><span class="fmeta-val">Oregon (US-West) or Ohio (US-East) — choose closest to Texas</span></div>
+  </div>
+
+  <div class="note warn"><span class="ni">⚠️</span>
+    <p><strong>Do not use the Render free tier.</strong> Free instances spin down after 15 minutes of inactivity and take 30–60 seconds to wake up on the next request. A dispatch run triggered on a cold instance will time out before it responds. Use the <strong>Starter plan (~$7/mo)</strong> which keeps the instance always running. Additionally, configure an uptime monitor such as UptimeRobot to ping <code>GET /health</code> every 10 minutes as a keep-warm measure.</p>
+  </div>
+
+  <p>
+    Render supports automatic deploys from GitHub. After each push to <code>main</code>, Render rebuilds and redeploys the backend automatically. The Deploy Hook URL (found in Render Settings) can also be stored as a GitHub Actions secret to trigger deploys from CI workflows.
+  </p>
+
+  <h3>Required Environment Variables on Render</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Variable</th><th>Where to Get It</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SUPABASE_URL</code></td><td>Supabase → Settings → API → Project URL</td><td>Required</td></tr>
+      <tr><td><code>SUPABASE_SERVICE_KEY</code></td><td>Supabase → Settings → API → service_role key</td><td>Required. Never expose this publicly.</td></tr>
+      <tr><td><code>SUPABASE_ANON_KEY</code></td><td>Supabase → Settings → API → anon public key</td><td>Required. Used for JWT validation.</td></tr>
+      <tr><td><code>GOOGLE_MAPS_API_KEY</code></td><td>Google Cloud Console → APIs &amp; Services → Credentials</td><td>Optional. Without it, all travel times use haversine fallback.</td></tr>
+      <tr><td><code>FRONTEND_URL</code></td><td>Your Vercel deployment URL</td><td>Required for CORS. Add after Vercel is deployed.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Frontend — Vercel</h3>
+  <p>
+    The Next.js frontend is deployed on Vercel's free Hobby plan. Vercel automatically detects Next.js projects and configures build settings. The only configuration needed is setting the root directory to <code>frontend</code> (since the repo contains backend and sync code too) and adding the three environment variables.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Variable</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>Same Supabase project URL</td></tr>
+      <tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>Supabase anon/public key</td></tr>
+      <tr><td><code>NEXT_PUBLIC_API_URL</code></td><td>Your Render service URL (e.g. <code>https://autorouting-api.onrender.com</code>)</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Note the order dependency: you need the Render URL before you can fully configure Vercel, and you need the Vercel URL before you can set <code>FRONTEND_URL</code> on Render. Deploy Render first, copy its URL, deploy Vercel, then go back to Render and add <code>FRONTEND_URL</code>.
+  </p>
+
+  <h3>Sync Script — Local Windows PC</h3>
+  <p>
+    The sync script is not a hosted service — it runs on a Windows PC at the office, in the same network where the Excel files live. It only needs outbound internet access to reach Supabase.
+  </p>
+<pre># One-time setup
+cd sync
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env: fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, and EXCEL_DIR
+
+# Test that it works
+python sync.py --once
+
+# Run as a continuous background process (loops every 5 min until Ctrl+C)
+python sync.py</pre>
+  <p>
+    For production, schedule it via Windows Task Scheduler: create a task that runs <code>python sync.py --once</code> every 5 minutes, starting in the sync folder directory. This way the process is managed by Windows and restarts automatically after system reboots.
+  </p>
+
+  <h3>CORS Configuration</h3>
+  <p>
+    The FastAPI backend uses CORS middleware that allows requests from <code>FRONTEND_URL</code> and <code>http://localhost:3000</code> (for local development). Both origins are set at startup. If you add a staging environment or a custom domain for the frontend, add it to the <code>allow_origins</code> list in <code>backend/api/main.py</code> and redeploy the backend.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     11. SETUP GUIDE
+══════════════════════════════════════════════ -->
+<div class="sec" id="setup">
+  <h2><span class="sn">11</span> Setup &amp; First-Time Configuration</h2>
+  <p class="sec-intro">
+    This section walks through setting up AutoRoute from scratch. The steps must be followed in order — each one produces information (like a URL or API key) that the next step needs. Allow about 30–60 minutes for a complete first setup.
+  </p>
+  <div class="note info"><span class="ni">ℹ️</span><p>You will need accounts on: <a href="https://supabase.com">Supabase</a>, <a href="https://github.com">GitHub</a>, <a href="https://console.cloud.google.com">Google Cloud</a>, <a href="https://render.com">Render</a>, and <a href="https://vercel.com">Vercel</a>. All are free to sign up; only Render's Starter plan has a monthly cost.</p></div>
+
+  <h3>Step 1 — Set Up the Supabase Database</h3>
+  <p>This is the foundation. Everything else connects to Supabase.</p>
+  <ol>
+    <li>Log in to <a href="https://supabase.com">supabase.com</a> and open your project (or create a new one).</li>
+    <li>Go to <strong>SQL Editor</strong> in the left sidebar. Paste the entire contents of <code>database/schema.sql</code> from this repository. Click <strong>Run</strong>. This creates all 12 tables, indexes, RLS policies, and triggers in one shot.</li>
+    <li>Go to <strong>Settings → API</strong>. Copy and save these three values — you will use them in every subsequent step:
+      <ul>
+        <li><code>Project URL</code> → this is your <code>SUPABASE_URL</code></li>
+        <li><code>anon public</code> key → this is your <code>SUPABASE_ANON_KEY</code></li>
+        <li><code>service_role</code> key → this is your <code>SUPABASE_SERVICE_KEY</code> — treat this like a password and never put it in frontend code</li>
+      </ul>
+    </li>
+    <li>Go to <strong>Authentication → Users</strong> and create your first admin user account (enter their email; they will set a password on first login).</li>
+    <li>Once the user exists in Supabase Auth, grant them the administrator role by running this SQL (replace with their actual email):
+      <pre>INSERT INTO app_users (id, email, full_name, role)
+SELECT id, email, 'Your Name Here', 'administrator'
+FROM auth.users
+WHERE email = 'your@email.com';</pre>
+    </li>
+  </ol>
+  <div class="note tip"><span class="ni">💡</span><p>If you ever lock yourself out of the admin account, you can re-run the INSERT above in the SQL Editor to recreate the <code>app_users</code> row. The Supabase Auth user record is unaffected.</p></div>
+
+  <h3>Step 2 — Push Code to GitHub</h3>
+  <p>Both Render and Vercel deploy by connecting to a GitHub repository, so the code needs to be on GitHub first.</p>
+  <pre>git init
+git remote add origin https://github.com/YOUR_USERNAME/AutoRoutingNew.git
+git add .
+git commit -m "Initial commit: AutoRouting full stack"
+git push -u origin main</pre>
+  <p>Then go to <strong>GitHub → Settings → Secrets and Variables → Actions</strong> and add these repository secrets. They are used by GitHub Actions CI/CD workflows to trigger deploys:</p>
+  <pre>SUPABASE_URL
+SUPABASE_SERVICE_KEY
+SUPABASE_ANON_KEY
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+GOOGLE_MAPS_API_KEY
+RENDER_DEPLOY_HOOK_URL      ← add this after Step 4
+NEXT_PUBLIC_API_URL         ← add this after Step 4</pre>
+
+  <h3>Step 3 — Set Up the Google Maps API Key</h3>
+  <p>This step is optional but strongly recommended. Without a Google Maps key, all travel times fall back to haversine distance at 50 mph, which may produce unrealistic route timing estimates.</p>
+  <ol>
+    <li>Go to <a href="https://console.cloud.google.com">console.cloud.google.com</a> and sign in.</li>
+    <li>In the APIs &amp; Services section, enable the <strong>Routes API</strong>. (Also enable the <strong>Maps JavaScript API</strong> if you plan to add a map view in the future.)</li>
+    <li>Create a new API key. Restrict it to your Render server's IP address to prevent unauthorized usage.</li>
+    <li>Save the key as <code>GOOGLE_MAPS_API_KEY</code>.</li>
+  </ol>
+
+  <h3>Step 4 — Deploy the Backend API on Render</h3>
+  <ol>
+    <li>Go to <a href="https://render.com">render.com</a> and click <strong>New → Web Service</strong>.</li>
+    <li>Connect your GitHub account and select the <code>AutoRoutingNew</code> repository.</li>
+    <li>Configure the service:
+      <ul>
+        <li><strong>Name:</strong> <code>autorouting-api</code></li>
+        <li><strong>Root Directory:</strong> leave blank</li>
+        <li><strong>Build Command:</strong> <code>pip install -r backend/requirements.txt</code></li>
+        <li><strong>Start Command:</strong> <code>uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT</code></li>
+        <li><strong>Plan:</strong> Starter ($7/mo) — do not use Free</li>
+      </ul>
+    </li>
+    <li>Add all five environment variables from the table in Section 10 (<code>FRONTEND_URL</code> can be a placeholder for now).</li>
+    <li>Click <strong>Create Web Service</strong> and wait for the first deploy to complete (typically 2–4 minutes).</li>
+    <li>Once deployed, copy your service URL (e.g. <code>https://autorouting-api.onrender.com</code>). You will need this for Vercel.</li>
+    <li>Go to Render → Settings → copy the <strong>Deploy Hook URL</strong> and add it as a GitHub secret <code>RENDER_DEPLOY_HOOK_URL</code>.</li>
+  </ol>
+
+  <h3>Step 5 — Deploy the Frontend on Vercel</h3>
+  <ol>
+    <li>Go to <a href="https://vercel.com">vercel.com</a> and click <strong>Add New Project</strong>.</li>
+    <li>Import your <code>AutoRoutingNew</code> GitHub repository.</li>
+    <li>Under <strong>Framework Preset</strong>, select <strong>Next.js</strong>. Under <strong>Root Directory</strong>, enter <code>frontend</code>.</li>
+    <li>Add the three environment variables: <code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, and <code>NEXT_PUBLIC_API_URL</code> (use the Render URL from Step 4).</li>
+    <li>Click <strong>Deploy</strong>. Once done, copy your Vercel URL.</li>
+    <li>Go back to Render → Environment Variables → set <code>FRONTEND_URL</code> to your Vercel URL and save. Render will automatically redeploy with the updated CORS configuration.</li>
+  </ol>
+
+  <h3>Step 6 — Configure the Data Sync on the Office PC</h3>
+  <p>The sync script needs to run on a Windows machine that has access to the Excel files (usually the same machine running the ODBC connection).</p>
+  <pre>cd sync
+pip install -r requirements.txt
+cp .env.example .env</pre>
+  <p>Open <code>.env</code> in any text editor and fill in:</p>
+  <pre>SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_KEY=your-service-role-key
+EXCEL_DIR=C:/Users/You/OneDrive/Dispatch/   ← use forward slashes</pre>
+  <p>Test it:</p>
+  <pre>python sync.py --once</pre>
+  <p>You should see log output showing rows upserted for each table. Check the Supabase table editor to confirm data appeared. If it worked, schedule it in Windows Task Scheduler to run <code>python sync.py --once</code> every 5 minutes.</p>
+
+  <p><strong>Excel files required in your <code>EXCEL_DIR</code> folder:</strong></p>
+  <div class="tw"><table>
+    <thead><tr><th>Filename</th><th>Table It Populates</th><th>Special Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>Yard_Locations.xlsx</code></td><td><code>yard_locations</code></td><td>—</td></tr>
+      <tr><td><code>terminal_locations.xlsx</code></td><td><code>terminal_locations</code></td><td>Must include <code>is_diesel_wet</code> column (0 or 1)</td></tr>
+      <tr><td><code>site_details.xlsx</code></td><td><code>site_details</code></td><td>—</td></tr>
+      <tr><td><code>Auto_Routing_Driver_Schedule.xlsx</code></td><td><code>driver_schedules</code></td><td>Refreshed by ODBC daily</td></tr>
+      <tr><td><code>Driver_terminal_cards.xlsx</code></td><td><code>driver_terminal_cards</code></td><td>—</td></tr>
+      <tr><td><code>Loads Feed for Kim.xlsx</code></td><td><code>load_details</code></td><td>Must have both "Main" and "Driver &amp; Terminal" sheets</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Step 7 — First Login and Smoke Test</h3>
+  <ol>
+    <li>Navigate to your Vercel URL in a browser.</li>
+    <li>Log in with the admin email you created in Step 1.</li>
+    <li>Check the sync status indicator in the top-right header. It should show a green dot with a recent sync timestamp. If it shows an error, check that <code>sync.py --once</code> ran successfully and that the <code>sync_log</code> table has recent entries.</li>
+    <li>Go to the <strong>Drivers</strong> tab, select today's date, and confirm drivers appear with correct attendance flags.</li>
+    <li>Go to the <strong>Dispatch Board</strong> tab, make sure today's date is selected, and click <strong>Run Dispatch</strong>.</li>
+    <li>Within a few seconds, the board should populate with driver columns and load cards. Check that the unassigned count is reasonable for your data.</li>
+  </ol>
+  <div class="note tip"><span class="ni">💡</span><p>If no drivers appear after running dispatch, verify that <code>driver_schedules</code> has rows for today's date with <code>attendance_expected = 1</code>. If no loads appear in the board at all, verify that <code>load_details</code> has rows with <code>delivery_date</code> matching today and <code>load_status = 1</code>.</p></div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     12. CONFIGURATION REFERENCE
+══════════════════════════════════════════════ -->
+<div class="sec" id="config">
+  <h2><span class="sn">12</span> Configuration Reference</h2>
+  <p class="sec-intro">
+    All configuration is managed through environment variables in <code>.env</code> files. Each service has its own <code>.env.example</code> file in its directory showing the exact variable names needed. Never commit actual <code>.env</code> files to the repository — they contain secrets.
+  </p>
+
+  <h3>Backend Environment Variables (<code>backend/.env</code>)</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Variable</th><th>Required?</th><th>Description and Where to Get It</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>SUPABASE_URL</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>Your Supabase project URL. Found in Supabase → Settings → API → Project URL. Format: <code>https://abcdefgh.supabase.co</code></td>
+      </tr>
+      <tr>
+        <td><code>SUPABASE_SERVICE_KEY</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>The service role key. Found in Supabase → Settings → API → service_role. This key bypasses row-level security — treat it like a root database password. Never expose it to the frontend.</td>
+      </tr>
+      <tr>
+        <td><code>SUPABASE_ANON_KEY</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>The anon/public key. Found in Supabase → Settings → API → anon public. Used by the backend solely to call <code>supabase.auth.get_user(token)</code> for JWT validation.</td>
+      </tr>
+      <tr>
+        <td><code>GOOGLE_MAPS_API_KEY</code></td>
+        <td style="color:var(--text-dim)">Optional</td>
+        <td>Routes API key from Google Cloud Console. Without this, all travel times fall back to haversine distance at 50 mph. With it, the engine uses real traffic-aware driving times.</td>
+      </tr>
+      <tr>
+        <td><code>FRONTEND_URL</code></td>
+        <td style="color:var(--text-dim)">Optional</td>
+        <td>The URL of the deployed frontend (e.g. <code>https://autorouting.vercel.app</code>). Added to the CORS allowed origins list. Defaults to <code>http://localhost:3000</code> if not set.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Frontend Environment Variables (<code>frontend/.env</code>)</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Variable</th><th>Required?</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>NEXT_PUBLIC_SUPABASE_URL</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>Same Supabase project URL used by the backend. The <code>NEXT_PUBLIC_</code> prefix makes it available in browser-side code.</td>
+      </tr>
+      <tr>
+        <td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>The anon key for the Supabase JavaScript client. Safe to expose — Supabase RLS policies control what this key can access.</td>
+      </tr>
+      <tr>
+        <td><code>NEXT_PUBLIC_API_URL</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>The base URL of the FastAPI backend (e.g. <code>https://autorouting-api.onrender.com</code>). All API calls are made relative to this URL. Defaults to <code>http://localhost:8000</code> if not set.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Sync Script Environment Variables (<code>sync/.env</code>)</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Variable</th><th>Required?</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>SUPABASE_URL</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>Same Supabase project URL.</td>
+      </tr>
+      <tr>
+        <td><code>SUPABASE_SERVICE_KEY</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>Service role key — needed for bulk upserts.</td>
+      </tr>
+      <tr>
+        <td><code>EXCEL_DIR</code></td>
+        <td style="color:var(--green)">Required</td>
+        <td>File system path to the folder containing all Excel files. Use forward slashes even on Windows (e.g. <code>C:/Users/You/OneDrive/Dispatch/</code>). The path must end with a slash.</td>
+      </tr>
+      <tr>
+        <td><code>SYNC_INTERVAL_SECONDS</code></td>
+        <td style="color:var(--text-dim)">Optional</td>
+        <td>How many seconds to wait between sync cycles when running in continuous loop mode. Defaults to 300 (5 minutes). Set lower for more real-time updates; set higher to reduce Supabase write load.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Engine Tuning Constants</h3>
+  <p>
+    These are not environment variables — they are Python constants defined in the engine source files. Changing them requires editing the code and redeploying. They are documented here because they control the core routing behavior and may need adjustment as operational patterns evolve.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Constant</th><th>File</th><th>Default</th><th>What It Controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>TANKER_TRAVEL_MULTIPLIER</code></td>
+        <td><code>geo.py</code></td>
+        <td><code>1.20</code></td>
+        <td>Applied to every travel time estimate. 1.20 = 20% longer than the Google Maps passenger-car baseline. Adjust based on observed actual vs. estimated travel times.</td>
+      </tr>
+      <tr>
+        <td><code>TRAVEL_SPEED_MPH</code></td>
+        <td><code>geo.py</code></td>
+        <td><code>50</code></td>
+        <td>Speed used in the haversine fallback when Google Maps is unavailable. 50 mph is a conservative estimate for Texas highway driving with a loaded tanker.</td>
+      </tr>
+      <tr>
+        <td><code>LOAD_SERVICE_MINS</code></td>
+        <td><code>geo.py</code></td>
+        <td><code>30</code></td>
+        <td>Time the engine assumes a driver spends at the terminal loading fuel. Increase if average terminal loading times are longer.</td>
+      </tr>
+      <tr>
+        <td><code>UNLOAD_SERVICE_MINS</code></td>
+        <td><code>geo.py</code></td>
+        <td><code>45</code></td>
+        <td>Time the engine assumes a driver spends at the delivery site unloading. Includes setup and paperwork time.</td>
+      </tr>
+      <tr>
+        <td><code>EARLY_ALLOWANCE_MINS</code></td>
+        <td><code>routing_engine.py</code></td>
+        <td><code>120</code></td>
+        <td>How early a driver may arrive before a customer's delivery window opens. 120 minutes = 2 hours. Driver will wait at staging if they arrive this early.</td>
+      </tr>
+      <tr>
+        <td><code>LATE_ALLOWANCE_MINS</code></td>
+        <td><code>routing_engine.py</code></td>
+        <td><code>60</code></td>
+        <td>How many minutes after the window closes a driver is still considered "within tolerance". Does not cause rejection, but the load will show as running late.</td>
+      </tr>
+      <tr>
+        <td><code>REJECT_LATE_MINS</code></td>
+        <td><code>routing_engine.py</code></td>
+        <td><code>60</code></td>
+        <td>If a driver would arrive more than this many minutes after the window closes, the simulation fails and the assignment is rejected. Prevents assigning loads with missed windows.</td>
+      </tr>
+      <tr>
+        <td><code>MAX_OPT_ITERS</code></td>
+        <td><code>routing_engine.py</code></td>
+        <td><code>200</code></td>
+        <td>Maximum number of 2-opt improvement iterations before the engine gives up and returns the current best solution. A safety cap to prevent unusually long runs on degenerate data.</td>
+      </tr>
+    </tbody>
+  </table></div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     13. TROUBLESHOOTING
+══════════════════════════════════════════════ -->
+<div class="sec" id="trouble">
+  <h2><span class="sn">13</span> Troubleshooting</h2>
+  <p class="sec-intro">
+    This section covers the most common issues encountered during setup and daily operation. For each symptom, a likely cause and concrete fix are provided. If an issue is not listed here, check the Render logs (backend), Vercel deployment logs (frontend), and the <code>sync_log</code> table in Supabase (sync script).
+  </p>
+
+  <h3>Common Issues</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Symptom</th><th>Likely Cause</th><th>How to Fix It</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Sync says "file not found" for one or more tables</td>
+        <td><code>EXCEL_DIR</code> path in <code>.env</code> is wrong, or a file is named differently than expected</td>
+        <td>Double-check the path in <code>sync/.env</code>. Use forward slashes even on Windows. Verify the exact filenames in your Excel folder match what <code>sync.py</code> expects (see the Excel file mapping table in Section 4).</td>
+      </tr>
+      <tr>
+        <td>All API calls return 401 Unauthorized</td>
+        <td>Wrong or missing Supabase anon key on the frontend</td>
+        <td>Verify <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your Vercel project environment variables. Redeploy after changing. Also check that the key matches the one in Supabase → Settings → API → anon public.</td>
+      </tr>
+      <tr>
+        <td>No drivers show up on the Dispatch Board</td>
+        <td><code>driver_schedules</code> has no rows for today's date, or all rows have <code>attendance_expected = 0</code></td>
+        <td>Check that the driver schedule Excel file synced successfully (look at <code>sync_log</code> for today). In the Drivers tab, confirm the date matches the schedule date. Toggle at least one driver to "Working" and try running dispatch again.</td>
+      </tr>
+      <tr>
+        <td>All loads appear in the Unassigned panel with "No terminal access"</td>
+        <td><code>driver_terminal_cards</code> table is empty or out of date</td>
+        <td>Run <code>python sync.py --once</code> and watch the logs for the terminal_cards table. If the Excel file has data, confirm column names match what the transformer expects (<code>driver_id</code> and <code>terminal_id</code>).</td>
+      </tr>
+      <tr>
+        <td>Google Maps not being used — travel times seem unrealistic</td>
+        <td><code>GOOGLE_MAPS_API_KEY</code> is missing on Render, or the Routes API is not enabled in Google Cloud</td>
+        <td>Go to Render → Environment Variables and confirm <code>GOOGLE_MAPS_API_KEY</code> is set. In Google Cloud Console, confirm the <strong>Routes API</strong> (not just Maps JavaScript API) is enabled. Check Render logs for "Google Maps API error" warnings during a dispatch run.</td>
+      </tr>
+      <tr>
+        <td>Dispatch run takes 30+ seconds or times out</td>
+        <td>Render instance is cold-starting (free tier) or a large number of Google Maps API calls are not cached</td>
+        <td>Upgrade to Render Starter plan. Add a health-check ping every 10 minutes (UptimeRobot is free). On the first run of the day, the cache is empty — subsequent runs the same day will be faster.</td>
+      </tr>
+      <tr>
+        <td>Dispatch board shows old data after clicking "Run Dispatch"</td>
+        <td>Browser is showing cached state, or the background persist task failed</td>
+        <td>Hard-refresh the page (Ctrl+Shift+R). Check Render logs for "Failed to persist dispatch" errors after a run. Also verify that <code>dispatch_results</code> in Supabase has rows for today's date.</td>
+      </tr>
+      <tr>
+        <td>Diesel-wet sequencing rule does not seem to be enforced</td>
+        <td><code>is_diesel_wet</code> column is missing from <code>terminal_locations.xlsx</code></td>
+        <td>Open the Excel file and add an <code>is_diesel_wet</code> column with value <code>1</code> for the relevant terminals and <code>0</code> for all others. Resync. Check that the column appears in the <code>terminal_locations</code> table in Supabase.</td>
+      </tr>
+      <tr>
+        <td><code>board_location</code> is NULL for some or all drivers</td>
+        <td><code>division_prefix</code> or <code>default_shift_name</code> columns are blank or misspelled in the driver schedule Excel</td>
+        <td>The sync script derives <code>board_location</code> by joining these two columns with a hyphen (e.g. "TX" + "AM" = "TX-AM"). Valid values are: TX-AM, TX-PM, FW-AM, FW-PM, ET-AM. Any other combination results in NULL. Check the Excel source columns for typos or extra spaces.</td>
+      </tr>
+      <tr>
+        <td>Sync seems to skip some loads (fewer rows than expected)</td>
+        <td>Those loads have <code>load_status = 1</code> in Supabase, which protects them from ODBC overwrites</td>
+        <td>This is intentional behavior — loads marked status 1 in Supabase are "staged for routing" and the sync intentionally skips them to prevent the ODBC data from overwriting the dispatcher's intent. If you need to force a re-sync, manually set the affected rows to a different status in Supabase, then resync.</td>
+      </tr>
+      <tr>
+        <td>A driver appears on the board but has no loads assigned</td>
+        <td>The driver has no terminal access cards, or all loads require a terminal they do not have access to</td>
+        <td>Go to the Terminal Access tab and verify the driver has at least one terminal card. Cross-reference the terminals required by today's loads with the driver's card set. Add missing cards via the "Add Terminal Access" form.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h3>Adding New Users</h3>
+  <p>
+    New users cannot self-register — they must be invited by an administrator. The process is:
+  </p>
+  <ol>
+    <li>Go to <strong>Supabase → Authentication → Users → Invite User</strong> and enter the new user's email address. Supabase sends them an invite email with a link to set their password.</li>
+    <li>Once they click the link and set a password, their account exists in <code>auth.users</code> but they will not appear in the dashboard's Users tab yet — that table requires an <code>app_users</code> row.</li>
+    <li>An administrator must create the <code>app_users</code> row. This can be done from the Users tab in the dashboard (after the user has signed in at least once), or via SQL:</li>
+  </ol>
+  <pre>-- Run this in Supabase SQL Editor after the user has completed sign-up
+INSERT INTO app_users (id, email, full_name, role)
+SELECT id, email, 'First Last', 'user'
+FROM auth.users
+WHERE email = 'newuser@company.com';
+
+-- To make them an administrator instead, change 'user' to 'administrator'</pre>
+  <p>
+    After the <code>app_users</code> row is created, the user can log in normally and their role will be applied.
+  </p>
+
+  <h3>Future: OneDrive / O365 Integration</h3>
+  <p>
+    The current sync script reads Excel files from a local file system path. This means the sync must run on the same PC that has access to those files. A natural next step, when Office 365 permissions are available, is to read the files directly from SharePoint or OneDrive via the <strong>Microsoft Graph API</strong>.
+  </p>
+  <p>
+    Implementing this would require only a small change to the <code>sync_table()</code> function in <code>sync/sync.py</code> — replacing the file-system read with an authenticated HTTP download from the Graph API. The transformer pipeline, upsert logic, and all downstream behavior would remain exactly the same. The sync could then run from any machine with internet access (or from a cloud function), rather than requiring a dedicated office PC.
+  </p>
+
+  <hr class="divider">
+  <p class="footer">
+    AutoRoute Technical Overview · v1.0 · June 2026<br>
+    For routing algorithm background see <code>docs/ENGINE_ENHANCEMENTS.md</code><br>
+    Questions or changes? Open a pull request on the AutoRoutingNew GitHub repository.
+  </p>
+</div>
+
+</main>
+
+<script>
+// Highlight sidebar nav link matching the section currently in view
+const secs = document.querySelectorAll('.sec');
+const links = document.querySelectorAll('#sb a');
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(a => a.classList.remove('on'));
+      const l = document.querySelector(`#sb a[href="#${e.target.id}"]`);
+      if (l) l.classList.add('on');
+    }
+  });
+}, { rootMargin: '-10% 0px -80% 0px', threshold: 0 });
+secs.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

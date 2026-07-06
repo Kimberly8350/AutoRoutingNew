@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QW Transport — Terminals, Yards & Regions</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        #map { height: 100vh; width: 100%; }
+        .legend {
+            background: white; padding: 12px 16px; border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2); line-height: 1.8;
+            font-size: 13px;
+        }
+        .legend h4 { margin: 0 0 8px 0; font-size: 14px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+        .legend-square { width: 12px; height: 12px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map = L.map('map').setView([32.8, -96.8], 8);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18,
+        }).addTo(map);
+
+        var markers = [{"lat": 32.696, "lon": -97.60502, "name": "Aledo Magellan", "city": "Aledo", "state": "TX", "region": "FW-AM / FW-PM", "color": "#2ecc71", "type": "terminal"}, {"lat": 34.20397, "lon": -97.11028, "name": "Ardmore", "city": "Ardmore", "state": "OK", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.77693, "lon": -96.88479, "name": "Call KAG Dispatch", "city": "Dallas", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 25.9589, "lon": -97.37048, "name": "CITGO Brownsville", "city": "Brownsville", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.52991, "lon": -97.61153, "name": "Cresson", "city": "Cresson", "state": "TX", "region": "FW-AM", "color": "#27ae60", "type": "terminal"}, {"lat": 32.5305, "lon": -97.61292, "name": "Cresson Bio", "city": "Cresson", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.77651, "lon": -96.88933, "name": "Dallas Magellan", "city": "Dallas", "state": "TX", "region": "TX-AM / TX-PM", "color": "#2980b9", "type": "terminal"}, {"lat": 31.79738, "lon": -94.14378, "name": "Delek Center", "city": "Center", "state": "TX", "region": "ET-AM", "color": "#e74c3c", "type": "terminal"}, {"lat": 33.15668, "lon": -94.9841, "name": "Delek Mt Pleasant", "city": "Mt. Pleasant", "state": "TX", "region": "ET-AM", "color": "#e74c3c", "type": "terminal"}, {"lat": 32.39919, "lon": -97.42934, "name": "Delek Renewables Cleburne", "city": "Cleburne", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.81122, "lon": -97.09197, "name": "Direct Fuels LLC", "city": "Euless", "state": "TX", "region": "FW-AM / TX-PM", "color": "#1abc9c", "type": "terminal"}, {"lat": 33.20152, "lon": -92.67375, "name": "El Dorado Delek", "city": "El Dorado", "state": "AR", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.81628, "lon": -97.09532, "name": "Euless Flint Hills", "city": "Euless", "state": "TX", "region": "Shared (TX/FW)", "color": "#95a5a6", "type": "terminal"}, {"lat": 32.82213, "lon": -97.08223, "name": "Euless Kinder Morgan", "city": "Euless", "state": "TX", "region": "FW-AM", "color": "#27ae60", "type": "terminal"}, {"lat": 31.56258, "lon": -97.09967, "name": "Fikes Waco Terminal", "city": "Waco", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.06557, "lon": -96.86358, "name": "Frost Magellan", "city": "Frost", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.79011, "lon": -97.3285, "name": "Ft Worth Chevron", "city": "Fort Worth", "state": "TX", "region": "FW-AM / FW-PM", "color": "#2ecc71", "type": "terminal"}, {"lat": 32.80074, "lon": -97.30738, "name": "Ft Worth Motiva", "city": "Fort Worth", "state": "TX", "region": "FW-AM / FW-PM", "color": "#2ecc71", "type": "terminal"}, {"lat": 32.77693, "lon": -96.88479, "name": "Global Dallas", "city": "Dallas", "state": "TX", "region": "Shared (TX/FW)", "color": "#95a5a6", "type": "terminal"}, {"lat": 30.86993, "lon": -96.58642, "name": "Global Hearne", "city": "Hearne", "state": "TX", "region": "ET-AM", "color": "#e74c3c", "type": "terminal"}, {"lat": 32.83987, "lon": -96.93535, "name": "Irving Exxon", "city": "Irving", "state": "TX", "region": "Shared (TX/FW)", "color": "#95a5a6", "type": "terminal"}, {"lat": 32.77693, "lon": -96.88479, "name": "Motiva Enterprises LLC", "city": "Dallas", "state": "TX", "region": "Shared (All)", "color": "#7f8c8d", "type": "terminal"}, {"lat": 32.82677, "lon": -97.33074, "name": "Musket", "city": "Ft Worth", "state": "TX", "region": "FW-AM", "color": "#27ae60", "type": "terminal"}, {"lat": 32.82445, "lon": -97.34932, "name": "Musket Bio Top Tech Syste", "city": "Ft Worth", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 29.71266, "lon": -95.16002, "name": "MVP PASADENA", "city": "PASADENA", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.81955, "lon": -97.34847, "name": "Noble Petro Inc - Ft. Wor", "city": "Fort Worth", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.81122, "lon": -97.09197, "name": "Not Determined", "city": "Euless", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 31.82744, "lon": -102.33087, "name": "Odessa Magellan", "city": "Odessa", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 35.3395, "lon": -97.4415, "name": "OKC Magellan", "city": " Oklahoma City", "state": "OK", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.77693, "lon": -96.88479, "name": "ORDER REQUEST", "city": "Dallas", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 29.71372, "lon": -95.22541, "name": "Pasadena Motiva", "city": "Pasadena", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.92009, "lon": -97.11657, "name": "Southlake Magellan", "city": "Grapevine", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.91867, "lon": -97.12203, "name": "Southlake Nustar", "city": "Southlake", "state": "TX", "region": "Shared (TX/FW)", "color": "#95a5a6", "type": "terminal"}, {"lat": 32.46634, "lon": -94.06839, "name": "Sunoc Waskom", "city": "Waskom", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 33.03521, "lon": -96.19704, "name": "Sunoco Caddo LLC", "city": "Caddo Mills", "state": "TX", "region": "TX-AM", "color": "#3498db", "type": "terminal"}, {"lat": 31.79738, "lon": -94.14378, "name": "Sunoco Center", "city": "Center", "state": "TX", "region": "ET-AM", "color": "#e74c3c", "type": "terminal"}, {"lat": 32.74903, "lon": -96.96515, "name": "Targray Suncoast Terminal", "city": "Grand Prairie", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.35517, "lon": -95.28, "name": "Tyler Delek", "city": "Tyler", "state": "TX", "region": "ET-AM", "color": "#e74c3c", "type": "terminal"}, {"lat": 32.79011, "lon": -97.3285, "name": "US Oil", "city": "Fort Worth", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 33.26615, "lon": -96.58917, "name": "US OIL Melissa", "city": "Melissa", "state": "TX", "region": "TX-AM", "color": "#3498db", "type": "terminal"}, {"lat": 32.81322, "lon": -96.88916, "name": "VICNRG LLC Dallas", "city": "Dallas", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.81776, "lon": -97.3298, "name": "VICNRG LLC FTW", "city": "Fort Worth", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 31.56657, "lon": -97.09979, "name": "Waco Flint HIlls", "city": "Waco", "state": "TX", "region": "FW-AM", "color": "#27ae60", "type": "terminal"}, {"lat": 31.61492, "lon": -97.10864, "name": "Waco Motiva", "city": "Waco", "state": "TX", "region": "FW-AM", "color": "#27ae60", "type": "terminal"}, {"lat": 34.18531, "lon": -101.73637, "name": "White Energy", "city": "Plainview", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 34.82849, "lon": -102.36796, "name": "White Energy-HF", "city": "Hereford", "state": "TX", "region": "Unknown", "color": "#bdc3c7", "type": "terminal"}, {"lat": 32.77873, "lon": -97.34217, "name": "Ft Worth Cargill", "city": "Fort Worth", "state": "TX", "region": "FW-AM / FW-PM", "color": "#2ecc71", "type": "terminal"}, {"lat": 32.8211, "lon": -96.8543, "name": "Dallas", "city": "Dallas", "state": "TX", "region": "TX-AM / TX-PM", "color": "#2980b9", "type": "yard"}, {"lat": 32.7898, "lon": -97.3276, "name": "Ft Worth", "city": "Fort Worth", "state": "TX", "region": "FW-AM / FW-PM", "color": "#2ecc71", "type": "yard"}, {"lat": 33.0779, "lon": -96.1524, "name": "Caddo Mills", "city": "Greenville", "state": "TX", "region": "TX-AM", "color": "#3498db", "type": "yard"}, {"lat": 32.3901, "lon": -95.2915, "name": "Tyler - Reg", "city": "Tyler", "state": "TX", "region": "ET-AM", "color": "#e74c3c", "type": "yard"}, {"lat": 31.4243, "lon": -97.1937, "name": "Waco", "city": "Hewitt", "state": "TX", "region": "FW-AM", "color": "#27ae60", "type": "yard"}, {"lat": 33.283, "lon": -96.5331, "name": "Melissa", "city": "Melissa", "state": "TX", "region": "TX-AM", "color": "#3498db", "type": "yard"}, {"lat": 32.8026, "lon": -97.3217, "name": "Ft Worth - Lemming", "city": "Fort Worth", "state": "TX", "region": "FW-AM / FW-PM", "color": "#2ecc71", "type": "yard"}, {"lat": 32.3284, "lon": -95.2499, "name": "Tyler - Zee", "city": "Tyler", "state": "TX", "region": "ET-AM", "color": "#e74c3c", "type": "yard"}];
+
+        markers.forEach(function(m) {
+            var icon;
+            if (m.type === 'yard') {
+                icon = L.divIcon({
+                    html: '<div style="background:' + m.color + '; width:16px; height:16px; border:2px solid white; box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>',
+                    className: '',
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8],
+                });
+            } else {
+                icon = L.divIcon({
+                    html: '<div style="background:' + m.color + '; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>',
+                    className: '',
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6],
+                });
+            }
+
+            L.marker([m.lat, m.lon], {icon: icon})
+                .addTo(map)
+                .bindPopup('<strong>' + m.name + '</strong><br>' +
+                           m.city + ', ' + m.state + '<br>' +
+                           '<em>Type: ' + m.type + '</em><br>' +
+                           '<em>Region: ' + m.region + '</em>');
+        });
+
+        // Legend
+        var legend = L.control({position: 'bottomright'});
+        legend.onAdd = function(map) {
+            var div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = `
+                <h4>Regions</h4>
+                <div class="legend-item"><span class="legend-dot" style="background:#e74c3c"></span> ET-AM (East Texas)</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#3498db"></span> TX-AM (Dallas AM)</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#9b59b6"></span> TX-PM (Dallas PM)</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#27ae60"></span> FW-AM (Fort Worth AM)</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#f39c12"></span> FW-PM (Fort Worth PM)</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#95a5a6"></span> Shared</div>
+                <h4 style="margin-top:10px">Markers</h4>
+                <div class="legend-item"><span class="legend-dot" style="background:#555"></span> Terminal (circle)</div>
+                <div class="legend-item"><span class="legend-square" style="background:#555"></span> Yard (square)</div>
+            `;
+            return div;
+        };
+        legend.addTo(map);
+    </script>
+</body>
+</html>

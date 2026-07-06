@@ -1,0 +1,101 @@
+table_name,column_name,data_type,is_nullable
+Active_Drivers_Data,driver_id,text,NO
+Active_Drivers_Data,first_name,text,NO
+Active_Drivers_Data,last_name,text,YES
+Active_Drivers_Data,yard,text,YES
+Active_Drivers_Data,active_driver,boolean,YES
+Auto_Routing_Driver_Schedule,record_id,text,NO
+Auto_Routing_Driver_Schedule,driver_id,text,NO
+Auto_Routing_Driver_Schedule,first_name,text,YES
+Auto_Routing_Driver_Schedule,last_name,text,YES
+Auto_Routing_Driver_Schedule,driver_start_time,text,YES
+Auto_Routing_Driver_Schedule,division_prefix,text,YES
+Auto_Routing_Driver_Schedule,default_shift_name,text,YES
+Auto_Routing_Driver_Schedule,board_location,text,YES
+Auto_Routing_Driver_Schedule,yard,text,YES
+Auto_Routing_Driver_Schedule,shift_date,text,YES
+Auto_Routing_Driver_Schedule,driver_schedule,text,YES
+Auto_Routing_Driver_Schedule,attendance_expected,text,YES
+Yard_Locations,yard,text,NO
+Yard_Locations,longitude,text,NO
+Yard_Locations,latitude,text,YES
+Yard_Locations,zip,text,YES
+Yard_Locations,state,text,YES
+Yard_Locations,city,text,YES
+Yard_Locations,street,text,YES
+app_users,id,uuid,NO
+app_users,email,text,NO
+app_users,full_name,text,YES
+app_users,role,text,NO
+app_users,is_active,boolean,YES
+app_users,created_at,timestamp with time zone,YES
+app_users,updated_at,timestamp with time zone,YES
+dispatch_results,id,uuid,NO
+dispatch_results,dispatch_date,date,NO
+dispatch_results,board_location,text,YES
+dispatch_results,driver_id,integer,NO
+dispatch_results,driver_name,text,YES
+dispatch_results,route_sequence,integer,NO
+dispatch_results,ce_id,integer,NO
+dispatch_results,site_name,text,YES
+dispatch_results,site_city,text,YES
+dispatch_results,customer_name,text,YES
+dispatch_results,terminal_name,text,YES
+dispatch_results,terminal_id,integer,YES
+dispatch_results,window_start,timestamp with time zone,YES
+dispatch_results,window_end,timestamp with time zone,YES
+dispatch_results,eta,timestamp with time zone,YES
+dispatch_results,drive_to_terminal_mins,numeric,YES
+dispatch_results,drive_to_site_mins,numeric,YES
+dispatch_results,total_loaded_miles,numeric,YES
+dispatch_results,total_empty_miles,numeric,YES
+dispatch_results,status,text,YES
+dispatch_results,created_at,timestamp with time zone,YES
+dispatch_results,created_by,uuid,YES
+dispatch_results,run_id,uuid,YES
+dispatch_runs,run_id,uuid,NO
+dispatch_runs,dispatch_date,date,NO
+dispatch_runs,run_type,text,YES
+dispatch_runs,total_loads,integer,YES
+dispatch_runs,assigned_loads,integer,YES
+dispatch_runs,unassigned_loads,integer,YES
+dispatch_runs,run_duration_ms,integer,YES
+dispatch_runs,run_by,uuid,YES
+dispatch_runs,created_at,timestamp with time zone,YES
+dispatch_runs,is_active,boolean,YES
+driver exceptions,id,uuid,NO
+driver exceptions,driver_name,text,YES
+driver exceptions,site_id,text,YES
+driver exceptions,site_name,text,YES
+driver exceptions,restriction_type,text,YES
+driver exceptions,notes,text,YES
+driver exceptions,created_at,timestamp with time zone,YES
+driver terminal access,id,uuid,NO
+driver terminal access,driver_name,text,YES
+driver terminal access,terminal_name,text,YES
+driver_restrictions,id,integer,NO
+driver_restrictions,driver_id,integer,NO
+driver_restrictions,restriction_type,text,NO
+driver_restrictions,site_id,integer,YES
+driver_restrictions,customer_group_name,text,YES
+driver_restrictions,notes,text,YES
+driver_restrictions,created_at,timestamp with time zone,YES
+driver_restrictions,created_by,uuid,YES
+driver_schedules,record_id,integer,NO
+driver_schedules,driver_id,integer,NO
+driver_schedules,first_name,text,YES
+driver_schedules,last_name,text,YES
+driver_schedules,driver_start_time,time without time zone,YES
+driver_schedules,division_prefix,text,YES
+driver_schedules,default_shift_name,text,YES
+driver_schedules,board_location,text,YES
+driver_schedules,yard,text,YES
+driver_schedules,shift_date,date,YES
+driver_schedules,driver_schedule,integer,YES
+driver_schedules,attendance_expected,integer,YES
+driver_schedules,pump_trained,integer,YES
+driver_schedules,max_shift_hours,numeric,YES
+driver_schedules,updated_at,timestamp with time zone,YES
+driver_terminal_cards,id,integer,NO
+driver_terminal_cards,driver_id,integer,NO
+driver_terminal_cards,last_name,text,YES

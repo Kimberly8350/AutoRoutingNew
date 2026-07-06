@@ -168,21 +168,34 @@ def get_travel_mins_sync(
     lat2: float, lon2: float,
     departure_epoch: Optional[int] = None,
 ) -> float:
-    """Synchronous wrapper for get_travel_mins with in-process caching.
+    """Synchronous wrapper for get_travel_mins with multi-level caching.
+
+    Cache priority:
+    1. In-process memory cache (instant, same run)
+    2. Persistent Excel cache (same day-of-week + hour, across runs)
+    3. Google Maps API call (fresh, stored to both caches)
+    4. Haversine fallback (if API fails)
 
     Cache key is (lat1, lon1, lat2, lon2) rounded to 4dp + 15-min epoch bucket.
-    This means repeated legs (same terminal → same site) hit the cache instead
-    of consuming Google Maps quota.
-
-    Always creates a fresh event loop so this works correctly when called from
-    a thread pool executor (run_in_executor in FastAPI). Using
-    asyncio.get_event_loop() from a worker thread raises RuntimeError in
-    Python 3.10+ and would silently fall back to haversine.
     """
+    # Level 1: in-process cache
     key = _cache_key(lat1, lon1, lat2, lon2, departure_epoch)
     if key in _travel_cache:
         return _travel_cache[key]
 
+    # Level 2: persistent Excel cache (same day-of-week + hour)
+    try:
+        from engine.travel_cache import get_cached_travel_mins, store_travel_time
+        persistent_result = get_cached_travel_mins(lat1, lon1, lat2, lon2, departure_epoch)
+        if persistent_result is not None:
+            # Apply tanker multiplier (persistent cache stores raw Google times)
+            result = persistent_result * TANKER_TRAVEL_MULTIPLIER
+            _travel_cache[key] = result
+            return result
+    except ImportError:
+        pass
+
+    # Level 3: Google Maps API
     try:
         loop = asyncio.new_event_loop()
         try:
@@ -191,9 +204,19 @@ def get_travel_mins_sync(
             )
         finally:
             loop.close()
+
+        # Store raw (pre-multiplier) result in persistent cache
+        try:
+            raw_mins = result / TANKER_TRAVEL_MULTIPLIER
+            distance = haversine_miles(lat1, lon1, lat2, lon2)
+            store_travel_time(lat1, lon1, lat2, lon2, departure_epoch,
+                            raw_mins, distance, source="google_maps")
+        except Exception:
+            pass
+
     except Exception as e:
         log.warning(f"Google Maps API error: {e} — falling back to haversine")
-        result = haversine_travel_mins(lat1, lon1, lat2, lon2)
+        result = haversine_travel_mins(lat1, lon1, lat2, lon2) * TANKER_TRAVEL_MULTIPLIER
 
     _travel_cache[key] = result
     return result

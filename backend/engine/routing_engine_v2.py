@@ -118,6 +118,40 @@ class RoutingEngine:
 
     # ---- eligibility checks ----
 
+    # Terminal → eligible regions mapping.
+    # Derived from historical actuals: which board_locations load from each terminal.
+    # Terminals shared across regions list all eligible regions.
+    TERMINAL_REGIONS = {
+        "tyler delek": {"ET-AM"},
+        "global hearne": {"ET-AM"},
+        "sunoco caddo llc": {"TX-AM"},
+        "us oil melissa": {"TX-AM", "TX-PM"},
+        "dallas magellan": {"TX-AM", "TX-PM"},
+        "dallas motiva": {"TX-AM", "TX-PM"},
+        "motiva enterprises llc": {"TX-AM", "TX-PM", "FW-AM", "FW-PM", "ET-AM"},
+        "irving exxon": {"TX-AM", "TX-PM", "FW-AM", "FW-PM"},
+        "global dallas": {"TX-AM", "TX-PM", "FW-AM", "FW-PM"},
+        "euless flint hills": {"FW-AM", "FW-PM", "TX-AM", "TX-PM"},
+        "ft worth motiva": {"FW-AM", "FW-PM", "TX-PM"},
+        "ft worth chevron": {"FW-AM", "FW-PM"},
+        "southlake nustar": {"FW-AM", "FW-PM", "TX-AM", "TX-PM"},
+        "musket": {"FW-AM"},
+        "cresson": {"FW-AM"},
+        "euless kinder morgan": {"FW-AM"},
+        "waco flint hills": {"FW-AM"},
+        "waco motiva": {"FW-AM"},
+        "aledo magellan": {"FW-AM", "FW-PM"},
+        "direct fuels llc": {"FW-AM", "TX-PM"},
+    }
+
+    def _get_load_region(self, load: Load) -> Optional[set]:
+        """Return the set of eligible regions for a load based on its terminal.
+        Returns None if terminal is unknown (no constraint applied).
+        """
+        if not load.terminal_name:
+            return None
+        return self.TERMINAL_REGIONS.get(load.terminal_name.lower().strip())
+
     def _get_viable_terminal(self, driver: Driver, load: Load) -> Optional["Terminal"]:
         """Return the terminal to use for this driver/load pair.
         Tries the primary terminal first, then any alternates defined on the site.
@@ -143,6 +177,11 @@ class RoutingEngine:
         so that alternate terminals are considered before rejecting the driver.
         """
         site = load.site
+        # Region constraint: driver's board_location must match the load's region
+        if driver.board_location and load.terminal_name:
+            load_region = self._get_load_region(load)
+            if load_region and driver.board_location not in load_region:
+                return "No feasible assignment: Load outside driver region."
         # Pump certification
         if site and site.pump_certified and not driver.pump_trained:
             return "No feasible assignment: Pump certification required."

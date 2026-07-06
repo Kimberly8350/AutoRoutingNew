@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Load Kickback Analysis — May 2026</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #1a1f2e 0%, #161b2e 100%);
+    border-bottom: 1px solid #2d3748;
+    padding: 32px 40px;
+  }
+  header h1 { font-size: 28px; font-weight: 700; color: #f8fafc; letter-spacing: -0.5px; }
+  header p { color: #94a3b8; margin-top: 6px; font-size: 14px; }
+  header .badge {
+    display: inline-block; background: #ef4444; color: #fff;
+    font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 20px;
+    margin-left: 12px; vertical-align: middle; letter-spacing: 0.5px;
+  }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 32px 40px; }
+
+  /* KPI cards */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 36px; }
+  .kpi {
+    background: #1a1f2e; border: 1px solid #2d3748; border-radius: 12px;
+    padding: 22px 24px;
+  }
+  .kpi .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; }
+  .kpi .value { font-size: 38px; font-weight: 700; color: #f8fafc; margin-top: 6px; line-height: 1; }
+  .kpi .sub { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+  .kpi.red .value { color: #f87171; }
+  .kpi.amber .value { color: #fbbf24; }
+  .kpi.green .value { color: #34d399; }
+  .kpi.blue .value { color: #60a5fa; }
+
+  /* Section headers */
+  .section-title {
+    font-size: 18px; font-weight: 600; color: #f1f5f9;
+    margin-bottom: 20px; padding-bottom: 10px;
+    border-bottom: 1px solid #2d3748;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-title span { font-size: 20px; }
+
+  /* Chart grid */
+  .chart-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+  .chart-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+  .chart-full { margin-bottom: 32px; }
+
+  .card {
+    background: #1a1f2e; border: 1px solid #2d3748; border-radius: 12px;
+    padding: 24px;
+  }
+  .card h3 { font-size: 14px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 18px; }
+  .chart-wrap { position: relative; }
+  .chart-wrap.tall { height: 320px; }
+  .chart-wrap.medium { height: 260px; }
+  .chart-wrap.short { height: 220px; }
+
+  /* Insight boxes */
+  .insights { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
+  .insight {
+    background: #1a1f2e; border: 1px solid #2d3748; border-radius: 12px;
+    padding: 20px; border-left: 4px solid;
+  }
+  .insight.red { border-left-color: #ef4444; }
+  .insight.amber { border-left-color: #f59e0b; }
+  .insight.blue { border-left-color: #3b82f6; }
+  .insight.green { border-left-color: #10b981; }
+  .insight.purple { border-left-color: #8b5cf6; }
+  .insight h4 { font-size: 13px; font-weight: 700; color: #f1f5f9; margin-bottom: 8px; }
+  .insight p { font-size: 13px; color: #94a3b8; line-height: 1.6; }
+  .insight strong { color: #e2e8f0; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #0f1117; color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.6px; padding: 10px 14px; text-align: left; border-bottom: 1px solid #2d3748; }
+  td { padding: 10px 14px; border-bottom: 1px solid #1e2533; color: #cbd5e1; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1e2533; }
+  .pill {
+    display: inline-block; padding: 2px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 600;
+  }
+  .pill-red { background: rgba(239,68,68,0.15); color: #f87171; }
+  .pill-amber { background: rgba(245,158,11,0.15); color: #fbbf24; }
+  .pill-blue { background: rgba(59,130,246,0.15); color: #60a5fa; }
+  .pill-green { background: rgba(16,185,129,0.15); color: #34d399; }
+  .pill-purple { background: rgba(139,92,246,0.15); color: #a78bfa; }
+  .pill-gray { background: rgba(100,116,139,0.15); color: #94a3b8; }
+
+  .bar-inline {
+    display: inline-block; height: 6px; border-radius: 3px;
+    vertical-align: middle; margin-left: 8px;
+  }
+
+  footer { text-align: center; padding: 32px; color: #334155; font-size: 12px; border-top: 1px solid #1e2533; margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Load Kickback Analysis <span class="badge">MAY 2026</span></h1>
+  <p>Incident data from qryIncidentsExportDateRange &nbsp;·&nbsp; May 5 – May 29, 2026 &nbsp;·&nbsp; 220 total incidents across 25 operating days</p>
+</header>
+
+<div class="container">
+
+  <!-- KPI Row -->
+  <div class="kpis">
+    <div class="kpi red">
+      <div class="label">Total Kickbacks</div>
+      <div class="value">220</div>
+      <div class="sub">Over 25 days</div>
+    </div>
+    <div class="kpi amber">
+      <div class="label">Avg Per Day</div>
+      <div class="value">8.8</div>
+      <div class="sub">Peak: 32 on May 19</div>
+    </div>
+    <div class="kpi blue">
+      <div class="label">Drivers Involved</div>
+      <div class="value">46</div>
+      <div class="sub">Top: Daniel Nuncio (15)</div>
+    </div>
+    <div class="kpi green">
+      <div class="label">Top Root Cause</div>
+      <div class="value">48%</div>
+      <div class="sub">Out of Hours (106 incidents)</div>
+    </div>
+  </div>
+
+  <!-- Key Insights -->
+  <div class="section-title"><span>💡</span> Key Insights</div>
+  <div class="insights">
+    <div class="insight red">
+      <h4>🕐 Shift Time Is the #1 Problem</h4>
+      <p><strong>48% of all kickbacks</strong> (106 incidents) are due to drivers running out of hours. Better load sequencing and earlier dispatch cutoffs could directly eliminate this.</p>
+    </div>
+    <div class="insight amber">
+      <h4>🔧 Equipment Failures Are Undercounted</h4>
+      <p><strong>46 incidents (21%)</strong> involve trailer brakes, no available trailers, coolant leaks, and tire failures — most logged as "generic" and previously invisible.</p>
+    </div>
+    <div class="insight blue">
+      <h4>📅 May 19 Was a Crisis Day</h4>
+      <p><strong>32 kickbacks in a single day</strong> — nearly 4× the average. This spike warrants investigation: terminal outage, staffing shortage, or weather event.</p>
+    </div>
+    <div class="insight purple">
+      <h4>🚛 3 Drivers Own 19% of All Kickbacks</h4>
+      <p><strong>Daniel Nuncio (15), Ashton Gie (14), Anthony Lopez (12)</strong> together account for 41 incidents. Targeted coaching or schedule review is warranted.</p>
+    </div>
+    <div class="insight green">
+      <h4>⛽ FuelCity & GPM Lead Site Kickbacks</h4>
+      <p><strong>FuelCity and GPM Empire tied at 37 each.</strong> Costco 1739 is the single most-kicked site (18 incidents), largely driven by one driver's recurring equipment issue.</p>
+    </div>
+    <div class="insight amber">
+      <h4>🌙 Late Night & Early Morning Are High-Risk</h4>
+      <p>Hours <strong>22:00–06:00</strong> account for a disproportionate share of kickbacks, when drivers are near end-of-shift and less likely to accept additional loads.</p>
+    </div>
+  </div>
+
+  <!-- Row 1: Daily trend + Category donut -->
+  <div class="chart-full">
+    <div class="card">
+      <h3>Daily Kickback Volume — May 5 to May 29, 2026</h3>
+      <div class="chart-wrap tall">
+        <canvas id="dailyChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: Category bar + Donut -->
+  <div class="chart-grid-2">
+    <div class="card">
+      <h3>Kickback Category Breakdown (Reclassified)</h3>
+      <div class="chart-wrap tall">
+        <canvas id="categoryChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Category Distribution</h3>
+      <div class="chart-wrap tall">
+        <canvas id="donutChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 3: Driver + Customer -->
+  <div class="chart-grid-2">
+    <div class="card">
+      <h3>Top 15 Drivers by Kickback Count</h3>
+      <div class="chart-wrap" style="height:380px">
+        <canvas id="driverChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Top 12 Customers / Billing Codes</h3>
+      <div class="chart-wrap" style="height:380px">
+        <canvas id="customerChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 4: Hourly + Top Sites -->
+  <div class="chart-grid-2">
+    <div class="card">
+      <h3>Kickbacks by Hour of Day (24h)</h3>
+      <div class="chart-wrap tall">
+        <canvas id="hourChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Top 12 Sites / Dealers Most Kicked</h3>
+      <div class="chart-wrap tall">
+        <canvas id="dealerChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detailed Table -->
+  <div class="section-title" style="margin-top:8px"><span>📋</span> Driver Detail — Top 20 by Kickback Count</div>
+  <div class="card" style="margin-bottom:32px">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Driver</th>
+          <th>Kickbacks</th>
+          <th>Share of Total</th>
+          <th>Volume</th>
+        </tr>
+      </thead>
+      <tbody id="driverTable"></tbody>
+    </table>
+  </div>
+
+  <!-- Category Detail Table -->
+  <div class="section-title"><span>📊</span> Category Detail with Real Root Causes</div>
+  <div class="card" style="margin-bottom:32px">
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Count</th>
+          <th>% of Total</th>
+          <th>Routing Engine Impact</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="pill pill-red">Out of Hours</span></td>
+          <td>106</td>
+          <td>48.2%</td>
+          <td>✅ <strong>Directly preventable</strong> — better sequencing & shift-aware assignment eliminates this</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-amber">Equipment / Mechanical</span></td>
+          <td>46</td>
+          <td>20.9%</td>
+          <td>⚠️ Not preventable by routing — requires fleet maintenance tracking & mid-shift override handling</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-purple">Refusal</span></td>
+          <td>23</td>
+          <td>10.5%</td>
+          <td>⚠️ Partially addressable — driver restriction rules and preferred-site logic can reduce unwanted assignments</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-gray">Other / Misc</span></td>
+          <td>21</td>
+          <td>9.5%</td>
+          <td>❌ Not addressable — one-off situations (site closed early, rain gear, slip seat scheduling)</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-blue">Personal Issue</span></td>
+          <td>12</td>
+          <td>5.5%</td>
+          <td>❌ Not addressable by routing</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-green">No Allocation</span></td>
+          <td>5</td>
+          <td>2.3%</td>
+          <td>⚠️ Terminal allocation data integration could flag unavailable products before dispatch</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-amber">Carding Issue</span></td>
+          <td>5</td>
+          <td>2.3%</td>
+          <td>✅ Terminal access card tracking already in routing engine — carding mismatches preventable</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-gray">Weather</span></td>
+          <td>2</td>
+          <td>0.9%</td>
+          <td>❌ Not addressable</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<footer>Ignition Dispatch — Load Kickback Analysis Report &nbsp;·&nbsp; Data: May 5–29, 2026 &nbsp;·&nbsp; 220 incidents</footer>
+
+<script>
+const COLORS = {
+  red:    '#f87171',
+  amber:  '#fbbf24',
+  blue:   '#60a5fa',
+  green:  '#34d399',
+  purple: '#a78bfa',
+  pink:   '#f472b6',
+  teal:   '#2dd4bf',
+  orange: '#fb923c',
+  gray:   '#94a3b8',
+};
+
+const defaultFont = { family: "'Segoe UI', system-ui, sans-serif", size: 12 };
+Chart.defaults.color = '#64748b';
+Chart.defaults.font = defaultFont;
+
+// ---- DATA ----
+const dailyLabels = ["05-May","06-May","07-May","08-May","09-May","10-May","11-May","12-May","13-May","14-May","15-May","16-May","17-May","18-May","19-May","20-May","21-May","22-May","23-May","24-May","25-May","26-May","27-May","28-May","29-May"];
+const dailyData   = [4,12,10,19,1,4,14,8,9,25,5,3,1,12,32,5,10,8,1,9,1,6,6,8,7];
+
+const catLabels = ["Out of Hours","Equipment / Mechanical","Refusal","Other","Personal Issue","No Allocation","Carding Issue","Weather"];
+const catData   = [106, 46, 23, 21, 12, 5, 5, 2];
+const catColors = [COLORS.red, COLORS.amber, COLORS.purple, COLORS.gray, COLORS.blue, COLORS.green, COLORS.orange, COLORS.teal];
+
+const driverLabels = ["Daniel Nuncio","Ashton Gie","Anthony Lopez","Manuel Soto","Samir Abdulallah","Robert Gardner","Omer Al Azawe","Prabhjot Randhawa","Teddy Bowman","Scott Watkins","Zacharey Greer","Merv Roney","Humberto Granados","Rufus Miller","Omar Abdulla"];
+const driverData   = [15,14,12,9,9,8,8,8,8,8,8,7,6,6,6];
+
+const customerLabels = ["FuelCity","GPM EMPIRE","Benchmark","KAG_COSTCO","Kroger","KAG_SEI","GPM EMPIRE INV","GPM_Petroleum","BJs Wholesale","KAG_FEDEX","KAG_PENSKE","QUEST"];
+const customerData   = [37,37,23,22,21,18,13,7,6,6,6,4];
+
+const hourLabels = ["00","01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","17","18","19","20","21","22","23"];
+const hourData   = [6,4,11,10,13,17,13,11,8,6,13,22,9,5,11,3,4,3,6,9,6,5,16,9];
+
+const dealerLabels = ["Costco 1739","Fuel City Mesquite","Fuel City Haltom City","Sam's Club #4795","Walmart #3777","Fuel City Saginaw","Fuel City Dallas","Fuel City Friendlys","Kroger 562","COSTCO 664","Kroger 145","DAL-300 Dallas-Irving"];
+const dealerData   = [18,9,7,7,6,6,5,5,4,3,3,3];
+
+// ---- CHARTS ----
+
+// 1. Daily trend
+new Chart(document.getElementById('dailyChart'), {
+  type: 'bar',
+  data: {
+    labels: dailyLabels,
+    datasets: [{
+      label: 'Kickbacks',
+      data: dailyData,
+      backgroundColor: dailyData.map(v => v >= 25 ? 'rgba(248,113,113,0.85)' : v >= 15 ? 'rgba(251,191,36,0.75)' : 'rgba(96,165,250,0.65)'),
+      borderColor: dailyData.map(v => v >= 25 ? '#f87171' : v >= 15 ? '#fbbf24' : '#60a5fa'),
+      borderWidth: 1, borderRadius: 4,
+    }, {
+      label: 'Daily Average (8.8)',
+      data: new Array(dailyLabels.length).fill(8.8),
+      type: 'line',
+      borderColor: 'rgba(100,116,139,0.5)',
+      borderDash: [6,4],
+      pointRadius: 0,
+      borderWidth: 1.5,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#94a3b8', font: defaultFont } }, tooltip: { mode: 'index' } },
+    scales: {
+      x: { grid: { color: '#1e2533' }, ticks: { color: '#64748b' } },
+      y: { grid: { color: '#1e2533' }, ticks: { color: '#64748b' }, beginAtZero: true }
+    }
+  }
+});
+
+// 2. Category horizontal bar
+new Chart(document.getElementById('categoryChart'), {
+  type: 'bar',
+  data: {
+    labels: catLabels,
+    datasets: [{ label: 'Incidents', data: catData, backgroundColor: catColors, borderRadius: 4 }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: {
+      callbacks: { label: ctx => ` ${ctx.parsed.x} incidents (${(ctx.parsed.x/220*100).toFixed(1)}%)` }
+    }},
+    scales: {
+      x: { grid: { color: '#1e2533' }, ticks: { color: '#64748b' }, beginAtZero: true },
+      y: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+    }
+  }
+});
+
+// 3. Donut
+new Chart(document.getElementById('donutChart'), {
+  type: 'doughnut',
+  data: {
+    labels: catLabels,
+    datasets: [{ data: catData, backgroundColor: catColors, borderColor: '#0f1117', borderWidth: 3, hoverOffset: 8 }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    cutout: '60%',
+    plugins: {
+      legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 12, font: { size: 11 } } },
+      tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} (${(ctx.parsed/220*100).toFixed(1)}%)` } }
+    }
+  }
+});
+
+// 4. Driver chart
+const driverGrad = driverData.map((_, i) => {
+  const pct = i / driverLabels.length;
+  return `rgba(${Math.round(248 - pct*100)}, ${Math.round(113 + pct*80)}, ${Math.round(113 + pct*120)}, 0.8)`;
+});
+new Chart(document.getElementById('driverChart'), {
+  type: 'bar',
+  data: {
+    labels: driverLabels,
+    datasets: [{ label: 'Kickbacks', data: driverData, backgroundColor: driverGrad, borderRadius: 3 }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#1e2533' }, ticks: { color: '#64748b' }, beginAtZero: true },
+      y: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 11 } } }
+    }
+  }
+});
+
+// 5. Customer chart
+new Chart(document.getElementById('customerChart'), {
+  type: 'bar',
+  data: {
+    labels: customerLabels,
+    datasets: [{ label: 'Kickbacks', data: customerData, backgroundColor: 'rgba(167,139,250,0.75)', borderColor: '#a78bfa', borderWidth: 1, borderRadius: 3 }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#1e2533' }, ticks: { color: '#64748b' }, beginAtZero: true },
+      y: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 11 } } }
+    }
+  }
+});
+
+// 6. Hourly histogram
+new Chart(document.getElementById('hourChart'), {
+  type: 'bar',
+  data: {
+    labels: hourLabels.map(h => h + ':00'),
+    datasets: [{
+      label: 'Kickbacks',
+      data: hourData,
+      backgroundColor: hourData.map(v => v >= 20 ? 'rgba(248,113,113,0.85)' : v >= 13 ? 'rgba(251,191,36,0.75)' : 'rgba(45,212,191,0.6)'),
+      borderRadius: 3,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#1e2533' }, ticks: { color: '#64748b', maxRotation: 45 } },
+      y: { grid: { color: '#1e2533' }, ticks: { color: '#64748b' }, beginAtZero: true }
+    }
+  }
+});
+
+// 7. Dealer chart
+new Chart(document.getElementById('dealerChart'), {
+  type: 'bar',
+  data: {
+    labels: dealerLabels,
+    datasets: [{ label: 'Kickbacks', data: dealerData, backgroundColor: 'rgba(251,146,60,0.75)', borderColor: '#fb923c', borderWidth: 1, borderRadius: 3 }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#1e2533' }, ticks: { color: '#64748b' }, beginAtZero: true },
+      y: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 11 } } }
+    }
+  }
+});
+
+// ---- Driver table ----
+const tbody = document.getElementById('driverTable');
+const pillClasses = ['pill-red','pill-amber','pill-amber','pill-blue','pill-blue','pill-blue','pill-blue','pill-blue','pill-blue','pill-blue','pill-blue','pill-gray','pill-gray','pill-gray','pill-gray','pill-gray','pill-gray','pill-gray','pill-gray','pill-gray'];
+driverLabels.forEach((name, i) => {
+  const count = driverData[i];
+  const pct = (count / 220 * 100).toFixed(1);
+  const barW = Math.round(count / 15 * 120);
+  tbody.innerHTML += `
+    <tr>
+      <td style="color:#475569">${i+1}</td>
+      <td><span class="pill ${pillClasses[i]}">${name}</span></td>
+      <td style="font-weight:700;color:#f1f5f9">${count}</td>
+      <td style="color:#94a3b8">${pct}%</td>
+      <td><span class="bar-inline" style="width:${barW}px;background:${catColors[0]};opacity:0.7"></span></td>
+    </tr>`;
+});
+</script>
+</body>
+</html>
