@@ -107,6 +107,12 @@ async def get_travel_mins(
 _travel_cache: dict[tuple, float] = {}
 
 
+def clear_travel_cache():
+    """Clear the in-process travel time cache between dispatch runs."""
+    _travel_cache.clear()
+    log.info("Travel time cache cleared")
+
+
 def get_travel_mins_sync(
     lat1: float, lon1: float,
     lat2: float, lon2: float,

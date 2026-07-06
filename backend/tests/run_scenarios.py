@@ -25,7 +25,6 @@ from datetime import datetime
 
 # Make sure backend/ is on the path when running from repo root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-os.environ.setdefault("GOOGLE_MAPS_API_KEY", "REDACTED_ROTATED_GOOGLE_MAPS_KEY")
 
 from engine.routing_engine import RoutingEngine
 from tests.fixtures import ALL_SCENARIOS, DISPATCH_DATE
