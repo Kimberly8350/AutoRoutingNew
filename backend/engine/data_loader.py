@@ -239,8 +239,10 @@ def load_drivers_for_date(
     drivers = []
     seen = set()
     for r in rows:
-        # Drivers without a board_location or yard are considered inactive (no longer with QW)
-        if not r.get("board_location") or not r.get("yard"):
+        # Drivers without a board_location or yard, or with yard explicitly marked
+        # "N/A" (termination convention), are considered inactive (no longer with QW)
+        yard_val = (r.get("yard") or "").strip()
+        if not r.get("board_location") or not yard_val or yard_val.upper() == "N/A":
             continue
 
         did = r.get("driver_id")

@@ -25,3 +25,11 @@ Thumbs.db
 # Secrets
 *.env
 !*.env.example
+.env.local
+.env*.local
+
+# Local report outputs (personal working artifacts, not shared repo content)
+Data/dispatch_breakdown_*.xlsx
+Data/dispatch_dashboard_*_mine.html
+Data/~$*
+backend/dispatch_result.json

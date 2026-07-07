@@ -706,13 +706,16 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
     )
 
     def _fetch_drivers(d: str) -> list:
-        return (
+        rows = (
             client.table("driver_schedules").select(_driver_cols)
             .eq("shift_date", d).eq("attendance_expected", 1)
             .not_.is_("board_location", "null").neq("board_location", "")
             .not_.is_("yard", "null").neq("yard", "")
             .execute().data
         )
+        # Yard is sometimes set to the literal string "N/A" (termination
+        # convention) rather than left blank — treat that as inactive too.
+        return [r for r in rows if (r.get("yard") or "").strip().upper() != "N/A"]
 
     # Same-day drivers whose shift starts before 20:00
     current_drivers = [
@@ -790,9 +793,20 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
     # assignments that landed in dispatch_results with dispatch_date = prev_date.
     pre_assigned_loads = _fetch_pre_assigned(dispatch_date)
 
-    dispatched_ce_ids = {r["ce_id"] for r in all_results}
-    seen: set[int] = set()
-    pre_assigned: list[dict] = []
+    # ---- Build numbered stops from CE-committed loads (status >= 10) ----
+    # dispatch_results is a stale engine snapshot.  Any load that CE has
+    # moved to status 10+ is "CE-committed" — its numbered slot must reflect
+    # what CE actually says right now, not what the engine last wrote.
+    # This also fixes overnight drivers (e.g. Nelson) whose old dispatch_results
+    # row may have been written with fewer stops than CE now shows.
+    COMMITTED_STATUSES = {10, 12, 20, 22, 24, 26}
+
+    def _committed_sort_key(load: dict) -> tuple:
+        status = int(load.get("load_status") or 0)
+        if status == 26:
+            return (0, 0, str(load.get("completed_delivery_time") or "9999"))
+        eta = load.get("delivery_eta") or load.get("window_start") or "9999"
+        return (1, -status, str(eta))
 
     def _pa_sort_key(r: dict):
         status = int(r.get("load_status") or 0)
@@ -804,27 +818,90 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             return (2, r.get("delivery_eta") or "9999")
         return (3, r.get("delivery_eta") or "9999")
 
-    for load in sorted(pre_assigned_loads, key=_pa_sort_key):
+    # Group CE-committed loads by driver (deduplicated by ce_id — multi-product
+    # BOLs share a ce_id and appear as one numbered stop).
+    driver_committed: dict[int, list] = {}
+    committed_ce_ids: set[int] = set()
+    seen_committed: set[int] = set()
+
+    for load in pre_assigned_loads:
         ce_id = load.get("ce_id")
-        if ce_id is None or ce_id in dispatched_ce_ids or ce_id in seen:
+        status = int(load.get("load_status") or 0)
+        if ce_id is None or status not in COMMITTED_STATUSES or ce_id in seen_committed:
             continue
-        seen.add(ce_id)
         fname = (load.get("first_name") or "").strip()
         lname = (load.get("last_name") or "").strip()
         driver = driver_name_map.get(f"{fname} {lname}".lower())
         if not driver:
             continue
-        status = int(load.get("load_status") or 0)
-        # For overnight drivers (start >= 20:00), skip status=2 loads.
-        # Status-2 = CE-scheduled but not yet dispatched = next-night shift loads.
-        # Their current-shift work will already be status > 2 (dispatched /
-        # en-route / delivered) by the time this board is viewed.
-        if driver["driver_id"] in overnight_driver_ids and status == 2:
+        seen_committed.add(ce_id)
+        committed_ce_ids.add(ce_id)
+        driver_committed.setdefault(driver["driver_id"], []).append(load)
+
+    # Build numbered stop rows sorted chronologically per driver
+    committed_results: list[dict] = []
+    for driver_id, d_loads in driver_committed.items():
+        driver_row = next((d for d in driver_rows if d.get("driver_id") == driver_id), None)
+        if not driver_row:
             continue
-        display_eta = (
-            load.get("completed_delivery_time") or load.get("delivery_eta")
-            if status == 26 else load.get("delivery_eta")
-        )
+        for seq, load in enumerate(sorted(d_loads, key=_committed_sort_key)):
+            ce_id = load.get("ce_id")
+            status = int(load.get("load_status") or 0)
+            disp_eta = (
+                load.get("completed_delivery_time") or load.get("delivery_eta")
+                if status == 26
+                else load.get("delivery_eta")
+            )
+            _tname = (load.get("terminal_name") or "").lower().strip()
+            committed_results.append({
+                "dispatch_date": dispatch_date,
+                "driver_id": driver_id,
+                "driver_name": f"{driver_row['first_name']} {driver_row['last_name']}",
+                "board_location": driver_row.get("board_location"),
+                "ce_id": ce_id,
+                "route_sequence": seq,
+                "terminal_name": load.get("terminal_name") or "",
+                "terminal_abbreviation": _term_abbr.get(_tname, ""),
+                "site_name": load.get("site_name") or "",
+                "site_city": load.get("city") or "",
+                "eta": disp_eta,
+                "load_status": status,
+                "completed_delivery_time": load.get("completed_delivery_time"),
+                "pre_assigned": False,
+            })
+
+    # Engine-routed new loads: dispatch_results rows whose ce_id is NOT yet
+    # CE-committed (status < 10, engine-placed only).  These are appended
+    # after the CE stops with route_sequence renumbered per driver.
+    engine_only = [r for r in all_results if r.get("ce_id") not in committed_ce_ids]
+    driver_ce_count = {did: len(lst) for did, lst in driver_committed.items()}
+    for r in engine_only:
+        did = r.get("driver_id")
+        offset = driver_ce_count.get(did, 0)
+        r["route_sequence"] = offset + (r.get("route_sequence") or 0)
+
+    final_results = committed_results + engine_only
+
+    # ---- pre-assigned panel: status=2 only (CE-planned, not yet dispatched) ----
+    # Everything status >= 10 is now a numbered stop in committed_results.
+    pre_assigned: list[dict] = []
+    seen_pa: set[int] = set()
+
+    for load in sorted(pre_assigned_loads, key=_pa_sort_key):
+        ce_id = load.get("ce_id")
+        status = int(load.get("load_status") or 0)
+        if ce_id is None or status != 2 or ce_id in committed_ce_ids or ce_id in seen_pa:
+            continue
+        seen_pa.add(ce_id)
+        fname = (load.get("first_name") or "").strip()
+        lname = (load.get("last_name") or "").strip()
+        driver = driver_name_map.get(f"{fname} {lname}".lower())
+        if not driver:
+            continue
+        # For overnight drivers, skip status=2 (those are next-shift planned
+        # loads, not current-shift work).
+        if driver["driver_id"] in overnight_driver_ids:
+            continue
         _tname = (load.get("terminal_name") or "").lower().strip()
         pre_assigned.append({
             "dispatch_date": dispatch_date,
@@ -837,7 +914,7 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             "terminal_abbreviation": _term_abbr.get(_tname, ""),
             "site_name": load.get("site_name") or "",
             "site_city": load.get("city") or "",
-            "eta": display_eta,
+            "eta": load.get("delivery_eta"),
             "load_status": status,
             "completed_delivery_time": load.get("completed_delivery_time"),
             "pre_assigned": True,
@@ -871,7 +948,7 @@ def _get_dispatch_board_inner(dispatch_date: str, client):
             dr["route_finish_time"] = None
 
     return {
-        "dispatch_results": all_results,
+        "dispatch_results": final_results,
         "pre_assigned": pre_assigned,
         "unassigned": unassigned,
         "loads": loads + prev_loads,

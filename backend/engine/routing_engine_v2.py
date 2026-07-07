@@ -27,7 +27,7 @@ from models.models import (
     Driver, Load, Site, Terminal, Yard, DriverRoute, RouteStop,
     DispatchResult, LoadProduct,
 )
-from engine.geo import (
+from engine.geo_v2 import (
     get_travel_mins_sync, haversine_miles,
     LOAD_SERVICE_MINS, UNLOAD_SERVICE_MINS,
 )

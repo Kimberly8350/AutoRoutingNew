@@ -19,6 +19,14 @@ TRAVEL_SPEED_MPH = 50  # fallback if Maps API unavailable
 LOAD_SERVICE_MINS = 45
 UNLOAD_SERVICE_MINS = 45
 
+_travel_cache: dict = {}
+
+
+def clear_travel_cache():
+    """Clear the in-process travel time cache between dispatch runs."""
+    _travel_cache.clear()
+    log.info("Travel time cache cleared")
+
 
 def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate distance in miles between two lat/lon points."""
