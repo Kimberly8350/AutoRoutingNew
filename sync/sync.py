@@ -133,9 +133,9 @@ def transform_yard_locations(df: pd.DataFrame) -> list[dict]:
 def transform_terminal_locations(df: pd.DataFrame) -> list[dict]:
     df.columns = [c.lower().strip() for c in df.columns]
     df = df.rename(columns={"terminal_abreviation": "terminal_abbreviation"})
-    df["terminal_id"] = pd.to_numeric(df["terminal_id"], errors="coerce")
-    df = df.dropna(subset=["terminal_id"])
-    df["terminal_id"] = df["terminal_id"].astype(int)
+    # terminal_id is the ODBC string code (e.g. "T-01-TX-0001"), not numeric — keep as-is
+    df["terminal_id"] = df["terminal_id"].astype(str).str.strip()
+    df = df[df["terminal_id"].str.len() > 0]
     if "is_diesel_wet" not in df.columns:
         df["is_diesel_wet"] = 0
     return df.where(pd.notnull(df), None).to_dict("records")
@@ -221,10 +221,11 @@ def transform_driver_terminal_cards(df: pd.DataFrame) -> list[dict]:
     df = df.copy()
     df.columns = [c.lower().strip() for c in df.columns]
     df["driver_id"] = pd.to_numeric(df["driver_id"], errors="coerce")
-    df["terminal_id"] = pd.to_numeric(df["terminal_id"], errors="coerce")
-    df = df.dropna(subset=["driver_id", "terminal_id"])
+    df = df.dropna(subset=["driver_id"])
     df["driver_id"] = df["driver_id"].astype(int)
-    df["terminal_id"] = df["terminal_id"].astype(int)
+    # terminal_id is the ODBC string code (e.g. "T-01-TX-0001"), not numeric — keep as-is
+    df["terminal_id"] = df["terminal_id"].astype(str).str.strip()
+    df = df[df["terminal_id"].str.len() > 0]
     # Deduplicate within the batch to prevent ON CONFLICT errors
     df = df.drop_duplicates(subset=["driver_id", "terminal_id"], keep="last")
     df = df.replace([float("nan"), float("inf"), float("-inf")], None)
@@ -275,14 +276,20 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
     df["ce_id"] = pd.to_numeric(df["ce_id"], errors="coerce")
     df = df.dropna(subset=["ce_id"])
     df["ce_id"] = df["ce_id"].astype(int)
-    # Coerce integer FK columns — non-numeric values (e.g. "T-75-TX-2664") become None
-    for int_col in ["site_id", "terminal_id", "load_status"]:
+    # Coerce integer FK columns
+    for int_col in ["site_id", "load_status"]:
         if int_col in df.columns:
             df[int_col] = pd.to_numeric(df[int_col], errors="coerce")
             # Convert valid floats (e.g. 2.0) to int, leave NaN as None
             df[int_col] = df[int_col].apply(
                 lambda x: int(x) if pd.notna(x) else None
             )
+
+    # terminal_id is the ODBC string code (e.g. "T-75-TX-2664"), not numeric — keep as-is
+    if "terminal_id" in df.columns:
+        df["terminal_id"] = df["terminal_id"].apply(
+            lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() != "nan" else None
+        )
 
     for dt_col in ["window_start", "window_end", "delivery_eta", "arrived_at_rack",
                    "left_rack", "arrived_at_site", "completed_delivery_time"]:
@@ -323,7 +330,7 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
 
     # Final pass: force integer types for all known DB integer columns
     # (guards against pandas CoW keeping float dtype on object columns)
-    LOAD_INT_COLS = {"ce_id", "site_id", "terminal_id", "load_status"}
+    LOAD_INT_COLS = {"ce_id", "site_id", "load_status"}
     cleaned = []
     for r in records:
         row = {}

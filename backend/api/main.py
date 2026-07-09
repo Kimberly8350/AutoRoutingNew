@@ -111,7 +111,7 @@ class AddLoadRequest(BaseModel):
     delivery_date: str
     customer_name: str
     site_id: int
-    terminal_id: int
+    terminal_id: str  # ODBC string, e.g. "T-01-TX-0001"
     terminal_name: str
     product_name: str
     gross_gallons: float
@@ -986,7 +986,7 @@ def add_terminal(body: dict, user=Depends(verify_token)):
 
 
 @app.delete("/api/terminals/{terminal_id}")
-def delete_terminal(terminal_id: int, user=Depends(verify_token)):
+def delete_terminal(terminal_id: str, user=Depends(verify_token)):
     client = get_supabase()
     client.table("terminal_locations").delete().eq("terminal_id", terminal_id).execute()
     return {"status": "ok"}

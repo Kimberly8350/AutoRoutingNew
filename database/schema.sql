@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS yard_locations (
 -- TERMINALS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS terminal_locations (
-    terminal_id INTEGER PRIMARY KEY,
+    terminal_id TEXT PRIMARY KEY,  -- ODBC string code, e.g. "T-01-TX-0001"
     terminal_abbreviation TEXT,
     terminal_name TEXT NOT NULL,
     terminal_address TEXT,
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS driver_terminal_cards (
     last_name TEXT,
     first_name TEXT,
     terminal_name TEXT,
-    terminal_id INTEGER,
+    terminal_id TEXT,  -- ODBC string code, e.g. "T-01-TX-0001"
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(driver_id, terminal_id)
 );
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS load_details (
     customer_name TEXT,
     order_number TEXT,
     site_id INTEGER,
-    terminal_id INTEGER,
+    terminal_id TEXT,  -- ODBC string code, e.g. "T-01-TX-0001"
     terminal_name TEXT,
     product_name TEXT,
     gross_gallons NUMERIC(10,2),
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS dispatch_results (
     site_city TEXT,
     customer_name TEXT,
     terminal_name TEXT,
-    terminal_id INTEGER,
+    terminal_id TEXT,  -- ODBC string code, e.g. "T-01-TX-0001"
     window_start TIMESTAMPTZ,
     window_end TIMESTAMPTZ,
     eta TIMESTAMPTZ,
