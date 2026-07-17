@@ -98,7 +98,9 @@ def fetch_loads_from_mysql() -> pd.DataFrame:
                 od.drop_eta_time                                                        AS Delivery_ETA,
                 od.drop_arrived_at_rack_time                                            AS Arrived_At_Rack_Time,
                 od.drop_finalized_delivery_time                                         AS Completed_Delivery_Time,
-                od.drop_status_id                                                       AS Load_Status
+                od.drop_status_id                                                       AS Load_Status,
+                od.drop_is_split                                                        AS Split,
+                od.drop_split_with_id                                                   AS Split_With_CE_ID
             FROM dlb_order_drops od
             JOIN  dlb_order_drop_details odd ON odd.drop_id      = od.drop_id
             LEFT JOIN dl_destinations    dest ON dest.destination_id = od.location_id
@@ -285,6 +287,16 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
                 lambda x: int(x) if pd.notna(x) else None
             )
 
+    if "split" in df.columns:
+        df["split"] = pd.to_numeric(df["split"], errors="coerce").fillna(0).astype(int)
+
+    if "split_with_ce_id" in df.columns:
+        df["split_with_ce_id"] = pd.to_numeric(df["split_with_ce_id"], errors="coerce")
+        # 0 means "not paired yet" in CE Connect, not a real ce_id reference
+        df["split_with_ce_id"] = df["split_with_ce_id"].apply(
+            lambda x: int(x) if pd.notna(x) and int(x) != 0 else None
+        )
+
     # terminal_id is the ODBC string code (e.g. "T-75-TX-2664"), not numeric — keep as-is
     if "terminal_id" in df.columns:
         df["terminal_id"] = df["terminal_id"].apply(
@@ -318,7 +330,7 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
         "load_status_description", "city", "state", "site_name", "site_address",
         "first_name", "last_name", "window_start", "window_end", "delivery_eta",
         "load_status", "arrived_at_rack", "left_rack", "arrived_at_site",
-        "completed_delivery_time",
+        "completed_delivery_time", "split", "split_with_ce_id",
     }
     df = df[[c for c in df.columns if c in DB_COLS]]
 
@@ -330,7 +342,7 @@ def transform_load_details(df: pd.DataFrame) -> list[dict]:
 
     # Final pass: force integer types for all known DB integer columns
     # (guards against pandas CoW keeping float dtype on object columns)
-    LOAD_INT_COLS = {"ce_id", "site_id", "load_status"}
+    LOAD_INT_COLS = {"ce_id", "site_id", "load_status", "split", "split_with_ce_id"}
     cleaned = []
     for r in records:
         row = {}

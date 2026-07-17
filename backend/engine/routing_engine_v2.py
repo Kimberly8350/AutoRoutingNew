@@ -47,6 +47,12 @@ STATUS_DELIVERED = 26
 LOCKED_STATUSES = {STATUS_ASSIGNED, STATUS_EN_ROUTE_RACK, STATUS_AT_RACK, STATUS_EN_ROUTE_SITE, STATUS_AT_SITE, STATUS_DELIVERED}
 SAME_TERMINAL_SWAP_STATUS = {STATUS_EN_ROUTE_RACK}
 
+# Max loads (capacity units — a split pair counts as 1) a driver can be given
+# in a single shift. Single source of truth used by the main greedy loop, the
+# retry pass, and 2-opt MOVE — previously the retry/2-opt checks hardcoded a
+# separate, inconsistent value (4) unrelated to this one.
+MAX_LOADS_PER_DRIVER = 5
+
 # 2-opt local search cap — prevents runaway loops on large dispatch days
 MAX_OPT_ITERS = 200
 
@@ -93,6 +99,7 @@ class RoutingEngine:
         yards: dict[str, Yard],
         dispatch_date: date,
         reroute: bool = False,
+        enforce_load_cap: bool = True,
     ):
         self.drivers = drivers
         self.loads = loads
@@ -103,6 +110,12 @@ class RoutingEngine:
         self.reroute = reroute
         self.routes: dict[int, DriverRoute] = {}
         self.unassigned: list[tuple] = []  # (load, reason, category)
+        # Testing flag: when False, skip the numeric max-loads-per-driver cap
+        # entirely and let shift time (max_shift_hours, via _simulate_route)
+        # be the only capacity constraint. All other eligibility checks
+        # (terminal access, region, pump cert, windows, split-pairing, etc.)
+        # are unaffected. Defaults to True so existing callers are unchanged.
+        self.enforce_load_cap = enforce_load_cap
 
     def _shift_start(self, driver: Driver) -> datetime:
         t = driver.start_time
@@ -255,28 +268,59 @@ class RoutingEngine:
             if not terminal or not site:
                 return None
 
-            # Drive from current pos to terminal (empty)
-            drive_to_terminal_mins = get_travel_mins_sync(
-                current_lat, current_lon,
-                terminal.latitude, terminal.longitude,
-                int(current_time.timestamp()),
+            # Split loads: two ce_ids loaded together in one terminal visit,
+            # delivered to two sites back-to-back with no return-to-terminal.
+            # Detected structurally — this stop is a "continuation" when it's
+            # flagged split, its declared partner is the immediately preceding
+            # stop, and both resolved to the same physical terminal.
+            prev_load = stops[seq - 1][0] if seq > 0 else None
+            is_continuation = bool(
+                route.stops
+                and load.split and load.split_with_ce_id and prev_load
+                and prev_load.ce_id == load.split_with_ce_id
+                and prev_load.terminal and prev_load.terminal.terminal_id == terminal.terminal_id
             )
-            empty_miles = haversine_miles(current_lat, current_lon, terminal.latitude, terminal.longitude)
-            arrive_terminal = current_time + timedelta(minutes=drive_to_terminal_mins)
 
-            if arrive_terminal > shift_end:
-                return None
+            if is_continuation:
+                # Reuse the previous stop's terminal visit — no re-terminal drive,
+                # no second LOAD_SERVICE_MINS. Drive straight from the previous
+                # stop's site to this site, loaded (product for both was already
+                # picked up in the one shared terminal visit).
+                prev_stop = route.stops[-1]
+                arrive_terminal = prev_stop.arrive_terminal
+                depart_terminal = prev_stop.depart_terminal
+                drive_to_terminal_mins = 0.0
+                empty_miles = 0.0
+                drive_to_site_mins = get_travel_mins_sync(
+                    current_lat, current_lon,
+                    site.latitude, site.longitude,
+                    int(current_time.timestamp()),
+                )
+                loaded_miles = haversine_miles(current_lat, current_lon, site.latitude, site.longitude)
+                arrive_site_raw = current_time + timedelta(minutes=drive_to_site_mins)
+            else:
+                # Drive from current pos to terminal (empty)
+                drive_to_terminal_mins = get_travel_mins_sync(
+                    current_lat, current_lon,
+                    terminal.latitude, terminal.longitude,
+                    int(current_time.timestamp()),
+                )
+                empty_miles = haversine_miles(current_lat, current_lon, terminal.latitude, terminal.longitude)
+                arrive_terminal = current_time + timedelta(minutes=drive_to_terminal_mins)
 
-            depart_terminal = arrive_terminal + timedelta(minutes=LOAD_SERVICE_MINS)
+                if arrive_terminal > shift_end:
+                    return None
 
-            # Drive from terminal to site (loaded)
-            drive_to_site_mins = get_travel_mins_sync(
-                terminal.latitude, terminal.longitude,
-                site.latitude, site.longitude,
-                int(depart_terminal.timestamp()),
-            )
-            loaded_miles = haversine_miles(terminal.latitude, terminal.longitude, site.latitude, site.longitude)
-            arrive_site_raw = depart_terminal + timedelta(minutes=drive_to_site_mins)
+                depart_terminal = arrive_terminal + timedelta(minutes=LOAD_SERVICE_MINS)
+
+                # Drive from terminal to site (loaded)
+                drive_to_site_mins = get_travel_mins_sync(
+                    terminal.latitude, terminal.longitude,
+                    site.latitude, site.longitude,
+                    int(depart_terminal.timestamp()),
+                )
+                loaded_miles = haversine_miles(terminal.latitude, terminal.longitude, site.latitude, site.longitude)
+                arrive_site_raw = depart_terminal + timedelta(minutes=drive_to_site_mins)
 
             # Delivery window logic.
             # Overdue loads (window_end before dispatch day) have no enforceable window —
@@ -322,6 +366,8 @@ class RoutingEngine:
                 loaded_miles=loaded_miles,
                 empty_miles=empty_miles,
                 wait_mins=wait_mins,
+                is_split_continuation=is_continuation,
+                paired_ce_id=load.split_with_ce_id if load.split else None,
             )
             route.stops.append(stop)
 
@@ -484,6 +530,7 @@ class RoutingEngine:
 
             route = self.routes[driver.driver_id]
 
+            prev_locked_load: Optional[Load] = None
             for load in locked_loads:
                 # All loads reaching this loop are in LOCKED_STATUSES (status 10–26).
                 # They are physically committed — the driver is already dispatched,
@@ -505,6 +552,17 @@ class RoutingEngine:
                 #
                 # Solution: directly append a bare RouteStop.  Timing fields are
                 # populated from CE data (delivery_eta / completed_delivery_time).
+                #
+                # Split loads: if this committed load is the second half of a
+                # linked pair (its split_with_ce_id is the previous locked stop
+                # for this same driver, same terminal), mark it as a continuation
+                # so it counts as 1 capacity unit with its partner, not 2.
+                is_continuation = bool(
+                    load.split and load.split_with_ce_id and prev_locked_load
+                    and prev_locked_load.ce_id == load.split_with_ce_id
+                    and prev_locked_load.terminal and load.terminal
+                    and prev_locked_load.terminal.terminal_id == load.terminal.terminal_id
+                )
                 bare_stop = RouteStop(
                     ce_id=load.ce_id,
                     sequence=len(route.stops),
@@ -516,12 +574,15 @@ class RoutingEngine:
                         if load.load_status == STATUS_DELIVERED
                         else load.delivery_eta
                     ),
+                    is_split_continuation=is_continuation,
+                    paired_ce_id=load.split_with_ce_id if load.split else None,
                 )
                 route.stops.append(bare_stop)
                 log.debug(
                     f"Seeded locked ce_id={load.ce_id} status={load.load_status} "
                     f"driver={driver_id} seq={bare_stop.sequence}"
                 )
+                prev_locked_load = load
 
     # ---- route scoring ----
 
@@ -529,6 +590,13 @@ class RoutingEngine:
     def _route_score(route: DriverRoute) -> float:
         """Lower is better: penalises deadhead, rewards loaded miles."""
         return route.total_empty_miles - route.total_loaded_miles
+
+    @staticmethod
+    def _count_load_units(stops: list[RouteStop]) -> int:
+        """Count capacity 'slots' used by a list of stops. A split pair (one
+        stop plus its is_split_continuation partner) counts as 1 unit, not 2,
+        since they share a single terminal visit."""
+        return sum(1 for s in stops if not s.is_split_continuation)
 
     # ---- 2-opt / local-search improvement ----
 
@@ -584,11 +652,27 @@ class RoutingEngine:
                 )
 
                 # ---- SWAP: swap load ia from A with load jb from B ----
+                # Split-flagged loads are left alone here — moving only one half
+                # of a placed pair away from its partner would silently lose the
+                # shared-terminal-visit behavior. Full split-aware 2-opt is out
+                # of scope for now.
+                #
+                # IMPORTANT: the outer `enumerate(loads_a)` is bound to the list
+                # object as it was when the loop started. Once an improving swap
+                # is accepted, self.routes[did_a]/[did_b] change but this stale
+                # iterator keeps yielding (index, load) pairs from the OLD list —
+                # a later iteration can reference a load that's already been
+                # moved/swapped elsewhere, corrupting the next rebuild (this was
+                # a real bug: it could duplicate a load into the same driver's
+                # route multiple times). Fix: stop touching this driver pair the
+                # moment anything is accepted, and let the next full pass (of up
+                # to MAX_OPT_ITERS) pick up fresh, consistent state.
+                pair_changed = False
                 for ia, load_a in enumerate(loads_a):
-                    if self._is_locked(load_a):
+                    if self._is_locked(load_a) or load_a.split:
                         continue
                     for ib, load_b in enumerate(loads_b):
-                        if self._is_locked(load_b):
+                        if self._is_locked(load_b) or load_b.split:
                             continue
 
                         new_a_loads = loads_a[:ia] + [load_b] + loads_a[ia + 1:]
@@ -618,21 +702,25 @@ class RoutingEngine:
                             )
                             self.routes[did_a] = route_a
                             self.routes[did_b] = route_b
-                            # Refresh locals for the rest of this pair's inner loop
-                            loads_a = self._loads_for_driver(did_a)
-                            loads_b = self._loads_for_driver(did_b)
-                            base_score = new_score
                             improved = True
+                            pair_changed = True
+                            break  # stale loads_b — stop this pair now
+                    if pair_changed:
+                        break  # stale loads_a — stop this pair now
+
+                if pair_changed:
+                    continue  # move to the next driver pair; skip MOVE this round
 
                 # ---- MOVE: relocate one load from A → B ----
+                # Same split guard and stale-iterator fix as SWAP above.
                 for ia, load_a in enumerate(loads_a):
-                    if self._is_locked(load_a):
+                    if self._is_locked(load_a) or load_a.split:
                         continue
                     if len(loads_a) == 1:
                         # Moving the only load would leave A empty — skip
                         # (the engine doesn't track empty routes)
                         continue
-                    if len(loads_b) >= 4:
+                    if self.enforce_load_cap and len(loads_b) >= MAX_LOADS_PER_DRIVER:
                         continue  # B is already at max capacity
 
                     if self._check_driver_eligible(driver_b, load_a):
@@ -659,11 +747,11 @@ class RoutingEngine:
                             )
                             self.routes[did_a] = route_a
                             self.routes[did_b] = route_b
-                            loads_a = self._loads_for_driver(did_a)
-                            loads_b = self._loads_for_driver(did_b)
-                            base_score = new_score
                             improved = True
-                            break  # restart inner ia loop with fresh loads_a
+                            pair_changed = True
+                            break  # stale loads_b — stop this pair now
+                    if pair_changed:
+                        break  # stale loads_a — stop this pair now
 
         return improved
 
@@ -738,7 +826,7 @@ class RoutingEngine:
                 current_route = self.routes.get(driver.driver_id)
                 current_stops = []
                 if current_route:
-                    if len(current_route.stops) >= 4:
+                    if self.enforce_load_cap and len(current_route.stops) >= MAX_LOADS_PER_DRIVER:
                         continue
                     current_stops = [
                         (self._find_load_by_ce(s.ce_id), s.sequence)
@@ -777,6 +865,120 @@ class RoutingEngine:
 
         self.unassigned = permanent + still_unassigned
 
+    # ---- split-load pair assignment ----
+
+    def _try_assign_pair(
+        self,
+        pair: tuple[Load, Load],
+        initial_seeded: dict[int, int],
+        lock_boundaries: dict[int, int],
+    ) -> tuple[Optional[DriverRoute], Optional[Driver]]:
+        """Try to assign a linked split pair (one shared terminal visit, two
+        site deliveries back-to-back, no return-to-terminal between them) to
+        the best driver/position/leg-order.
+
+        Returns (route, driver) on success, or (None, None) if no driver could
+        take the pair — caller falls back to standalone scheduling for both legs.
+        """
+        load_a, load_b = pair
+        best_route = None
+        best_driver = None
+        best_score = float("inf")
+
+        sorted_drivers = self._sort_drivers(
+            self.drivers,
+            reroute_driver_id=load_a.assigned_driver_id if self.reroute else None,
+        )
+
+        dispatch_day_start = datetime(
+            self.dispatch_date.year, self.dispatch_date.month, self.dispatch_date.day
+        )
+        next_midnight = dispatch_day_start + timedelta(days=1)
+
+        for driver in sorted_drivers:
+            if self.reroute and driver.route_finish_time:
+                continue
+
+            # Next-day eligibility (mirrors the single-load check) — applies if
+            # either leg is a next-day load.
+            skip_next_day = False
+            for leg in (load_a, load_b):
+                leg_date = date.fromisoformat(leg.delivery_date) if leg.delivery_date else self.dispatch_date
+                if leg_date > self.dispatch_date and self._shift_end(driver) <= next_midnight:
+                    skip_next_day = True
+                    break
+            if skip_next_day:
+                continue
+
+            # Both legs must resolve to the SAME terminal for this driver —
+            # that's the entire premise of a split (one shared loading visit).
+            term_a = self._get_viable_terminal(driver, load_a)
+            term_b = self._get_viable_terminal(driver, load_b)
+            if not term_a or not term_b or term_a.terminal_id != term_b.terminal_id:
+                continue
+
+            if self._check_driver_eligible(driver, load_a) or self._check_driver_eligible(driver, load_b):
+                continue
+
+            if not driver.yard_location:
+                continue
+
+            current_route = self.routes.get(driver.driver_id)
+            current_units = self._count_load_units(current_route.stops) if current_route else 0
+            seed_units = initial_seeded.get(driver.driver_id, 0)
+            newly_added_units = current_units - seed_units
+            available_new_slots = max(0, MAX_LOADS_PER_DRIVER - driver.pre_assigned_count)
+            # A pair costs exactly 1 slot, same as a single load.
+            if self.enforce_load_cap and newly_added_units >= available_new_slots:
+                continue
+
+            current_stops = []
+            if current_route:
+                current_stops = [
+                    (self._find_load_by_ce(s.ce_id), s.sequence)
+                    for s in current_route.stops
+                ]
+
+            # Working copies pinned to the shared terminal, mirroring the
+            # alternate-terminal handling in the single-load path.
+            wa = load_a
+            if term_a.terminal_id != (load_a.terminal_id or ""):
+                wa = copy(load_a)
+                wa.terminal = term_a
+                wa.terminal_id = term_a.terminal_id
+            wb = load_b
+            if term_b.terminal_id != (load_b.terminal_id or ""):
+                wb = copy(load_b)
+                wb.terminal = term_b
+                wb.terminal_id = term_b.terminal_id
+
+            lock_pos = lock_boundaries.get(driver.driver_id, 0)
+            for pos in range(lock_pos, len(current_stops) + 1):
+                # Try both delivery orders (site1-then-site2 and vice versa) —
+                # whichever scores better wins, same as any other insertion choice.
+                for first, second in ((wa, wb), (wb, wa)):
+                    if self._check_diesel_wet_sequence(driver, first, pos):
+                        continue
+
+                    candidate_stops = (
+                        current_stops[:pos]
+                        + [(first, pos), (second, pos + 1)]
+                        + current_stops[pos:]
+                    )
+                    candidate_stops = [(l, i) for i, (l, _) in enumerate(candidate_stops)]
+
+                    simulated = self._simulate_route(driver, candidate_stops)
+                    if simulated is None:
+                        continue
+
+                    score = simulated.total_empty_miles - simulated.total_loaded_miles
+                    if score < best_score:
+                        best_score = score
+                        best_route = simulated
+                        best_driver = driver
+
+        return best_route, best_driver
+
     # ---- main run ----
 
     def run(self) -> DispatchResult:
@@ -807,11 +1009,16 @@ class RoutingEngine:
         # Only route loads that are unscheduled (status=1) or have no status set —
         # anything above status 1 is already in motion (dispatched, en route, delivered)
         # and belongs in the pre-assigned panel, not the routing queue.
+        # "ORDER REQUEST" is CE Connect's placeholder terminal_name for loads that
+        # are just a request, not yet a real confirmed order — there's nothing
+        # meaningful to route, so exclude them from routing entirely (they still
+        # exist in load_details for other views, just never attempted here).
         today = self.dispatch_date
         eligible_loads = [
             l for l in self.loads
             if l.delivery_date and 0 <= (date.fromisoformat(l.delivery_date) - today).days <= 1
             and (l.load_status == 1)  # only route unscheduled; 0=deleted, >1=in progress
+            and (l.terminal_name or "").strip().upper() != "ORDER REQUEST"
         ]
 
         # Validate each load
@@ -840,12 +1047,12 @@ class RoutingEngine:
         load_map = {l.ce_id: l for l in self.loads}
         self._seed_locked_loads(load_map)
 
-        # Snapshot seeded stop counts per driver.
-        # The greedy loop uses this to track only *newly added* loads so that
-        # CE pre-assigned loads and routed loads are never double-counted when
-        # enforcing the 5-load cap.
+        # Snapshot seeded capacity units per driver (a split pair counts as 1
+        # unit, not 2 — see _count_load_units). The greedy loop uses this to
+        # track only *newly added* loads so that CE pre-assigned loads and
+        # routed loads are never double-counted when enforcing the 5-load cap.
         initial_seeded: dict[int, int] = {
-            did: len(r.stops) for did, r in self.routes.items()
+            did: self._count_load_units(r.stops) for did, r in self.routes.items()
         }
 
         # Lock boundary per driver: the first insertion index that is safe for
@@ -871,7 +1078,60 @@ class RoutingEngine:
 
         remaining_loads = [l for l in sorted_loads if l.ce_id not in assigned_ce_ids]
 
+        # ---- split-load pairing ----
+        # A pair gets combined handling when: this load is flagged split=1, its
+        # partner ce_id is present among the OTHER remaining eligible loads, and
+        # both resolve to the same physical terminal. Otherwise the load falls
+        # back to normal standalone scheduling (per business rule — a load
+        # shouldn't get stuck just because its split partner isn't available).
+        remaining_by_ce = {l.ce_id: l for l in remaining_loads}
+        ce_to_pair: dict[int, tuple[Load, Load]] = {}
+        paired_ce_ids: set[int] = set()
         for load in remaining_loads:
+            if load.ce_id in paired_ce_ids or not load.split or not load.split_with_ce_id:
+                continue
+            partner = remaining_by_ce.get(load.split_with_ce_id)
+            if not partner or partner.ce_id in paired_ce_ids:
+                continue
+            if not load.terminal or not partner.terminal or load.terminal.terminal_id != partner.terminal.terminal_id:
+                continue
+            ce_to_pair[load.ce_id] = (load, partner)
+            ce_to_pair[partner.ce_id] = (load, partner)
+            paired_ce_ids.add(load.ce_id)
+            paired_ce_ids.add(partner.ce_id)
+
+        # Build the assignment queue in the same priority order _sort_loads gave —
+        # singles stay as Load, pairs become one (Load, Load) tuple positioned at
+        # whichever leg sorts first.
+        queue: list = []
+        queued_ce_ids: set[int] = set()
+        for load in remaining_loads:
+            if load.ce_id in queued_ce_ids:
+                continue
+            pair = ce_to_pair.get(load.ce_id)
+            if pair:
+                queue.append(pair)
+                queued_ce_ids.add(pair[0].ce_id)
+                queued_ce_ids.add(pair[1].ce_id)
+            else:
+                queue.append(load)
+                queued_ce_ids.add(load.ce_id)
+
+        for item in queue:
+            if isinstance(item, tuple):
+                pair_route, pair_driver = self._try_assign_pair(item, initial_seeded, lock_boundaries)
+                if pair_driver and pair_route:
+                    self.routes[pair_driver.driver_id] = pair_route
+                else:
+                    # Fall back to standalone scheduling for both legs. Re-queued
+                    # at the end of this pass — rare case (no driver could take
+                    # the pair together), so losing their original priority
+                    # ordering relative to other not-yet-assigned loads is an
+                    # acceptable tradeoff for keeping this loop simple.
+                    queue.extend(item)
+                continue
+
+            load = item
             failure_reasons = []
             # Separate reasons from drivers who could actually access the terminal vs.
             # those who failed the terminal-access check (zero-terminal or wrong terminal).
@@ -935,15 +1195,16 @@ class RoutingEngine:
 
                 current_route = self.routes.get(driver.driver_id)
                 current_stops = []
-                current_total = len(current_route.stops) if current_route else 0
+                current_total = self._count_load_units(current_route.stops) if current_route else 0
                 seeds = initial_seeded.get(driver.driver_id, 0)
                 # Loads added by this routing run (excludes CE locks already seeded).
+                # A split pair counts as 1 unit toward this budget, not 2.
                 newly_added = current_total - seeds
                 # Available new-load slots = 5 minus CE pre-assigned count.
                 # CE locks that were seeded don't reduce this budget (they're
                 # already represented in pre_assigned_count).
-                available_new_slots = max(0, 5 - driver.pre_assigned_count)
-                if newly_added >= available_new_slots:
+                available_new_slots = max(0, MAX_LOADS_PER_DRIVER - driver.pre_assigned_count)
+                if self.enforce_load_cap and newly_added >= available_new_slots:
                     failure_reasons.append("Shift time exceeded.")
                     terminal_eligible_reasons.append("Shift time exceeded.")
                     continue

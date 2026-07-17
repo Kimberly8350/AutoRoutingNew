@@ -151,6 +151,10 @@ CREATE TABLE IF NOT EXISTS load_details (
     arrived_at_rack TIMESTAMPTZ,
     left_rack TIMESTAMPTZ,
     arrived_at_site TIMESTAMPTZ,
+    -- Split loads: loaded together with another ce_id in one terminal visit,
+    -- delivered to two different sites with no return-to-terminal between them.
+    split INTEGER DEFAULT 0,
+    split_with_ce_id INTEGER,  -- the paired ce_id when split=1; NULL if unpaired
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (ce_id, product_name)
 );

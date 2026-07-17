@@ -162,15 +162,21 @@ def load_pre_assigned_counts(client: Client, dispatch_date: date) -> dict[str, i
 
     Covers dispatch_date + next day so overnight drivers' next-day CE assignments
     are included in their capacity budget.  Keyed by lowercase 'first last' name.
+
+    Deduplicated by ce_id (multi-product loads share a ce_id across several rows —
+    one physical load, not several). A linked split pair committed to the same
+    driver (split=1, split_with_ce_id pointing at another ce_id also committed to
+    that driver) counts as 1 toward the total, since it's a single terminal visit.
     """
     from datetime import timedelta
     dates = [dispatch_date.isoformat(), (dispatch_date + timedelta(days=1)).isoformat()]
-    counts: dict[str, int] = {}
+    # driver_key -> {ce_id: split_with_ce_id or None}
+    driver_loads: dict[str, dict[int, Optional[int]]] = {}
     for d in dates:
         try:
             rows = (
                 client.table("load_details")
-                .select("first_name,last_name")
+                .select("ce_id,first_name,last_name,split,split_with_ce_id")
                 .eq("delivery_date", d)
                 .gt("load_status", 1)
                 .not_.is_("first_name", "null")
@@ -180,11 +186,26 @@ def load_pre_assigned_counts(client: Client, dispatch_date: date) -> dict[str, i
             for r in rows:
                 fn = (r.get("first_name") or "").strip()
                 ln = (r.get("last_name") or "").strip()
-                if fn or ln:
+                ce_id = r.get("ce_id")
+                if (fn or ln) and ce_id is not None:
                     key = f"{fn} {ln}".strip().lower()
-                    counts[key] = counts.get(key, 0) + 1
+                    partner = r.get("split_with_ce_id") if r.get("split") else None
+                    driver_loads.setdefault(key, {})[int(ce_id)] = int(partner) if partner else None
         except Exception as e:
             log.warning(f"Could not load pre-assigned counts for {d}: {e}")
+
+    counts: dict[str, int] = {}
+    for key, ce_map in driver_loads.items():
+        seen: set[int] = set()
+        total = 0
+        for ce_id, partner in ce_map.items():
+            if ce_id in seen:
+                continue
+            seen.add(ce_id)
+            if partner and partner in ce_map:
+                seen.add(partner)  # linked split pair, both committed to this driver — count once
+            total += 1
+        counts[key] = total
     return counts
 
 
@@ -214,7 +235,13 @@ def load_drivers_for_date(
     client: Client,
     dispatch_date: date,
     yards: dict[str, Yard],
+    force_include: Optional[set[str]] = None,
 ) -> list[Driver]:
+    """force_include: lowercase 'first last' names to include regardless of the
+    yard/board_location/driver_inactive/attendance_expected checks below — for
+    historical backtests where a driver's *current* inactive/attendance status
+    doesn't reflect whether they actually worked on this past date."""
+    force_include = force_include or set()
     date_str = dispatch_date.isoformat()
     rows = (
         client.table("driver_schedules")
@@ -239,24 +266,28 @@ def load_drivers_for_date(
     drivers = []
     seen = set()
     for r in rows:
-        # Drivers without a board_location or yard, or with yard explicitly marked
-        # "N/A" (termination convention), are considered inactive (no longer with QW)
-        yard_val = (r.get("yard") or "").strip()
-        if not r.get("board_location") or not yard_val or yard_val.upper() == "N/A":
-            continue
+        name_key = f"{(r.get('first_name') or '').strip()} {(r.get('last_name') or '').strip()}".strip().lower()
+        forced = name_key in force_include
 
         did = r.get("driver_id")
         if not did or did in seen:
             continue
 
-        # Skip permanently deactivated drivers
-        if int(did) in inactive_ids:
-            continue
+        if not forced:
+            # Drivers without a board_location or yard, or with yard explicitly marked
+            # "N/A" (termination convention), are considered inactive (no longer with QW)
+            yard_val = (r.get("yard") or "").strip()
+            if not r.get("board_location") or not yard_val or yard_val.upper() == "N/A":
+                continue
 
-        # attendance_expected overrides driver_schedule
-        is_working = int(r.get("attendance_expected") or 0)
-        if not is_working:
-            continue
+            # Skip permanently deactivated drivers
+            if int(did) in inactive_ids:
+                continue
+
+            # attendance_expected overrides driver_schedule
+            is_working = int(r.get("attendance_expected") or 0)
+            if not is_working:
+                continue
 
         seen.add(int(did))
 
@@ -316,11 +347,26 @@ def load_loads_for_date(
         )
         all_rows.extend(rows)
 
-    # Build terminal name → terminal_id lookup (ODBC string IDs)
+    # Build terminal name → terminal_id lookup (ODBC string IDs).
+    # "Not Determined" (terminal_id T-00-00-0000) is CE Connect's placeholder for
+    # loads that haven't been assigned a real terminal yet — excluded here so
+    # name-based lookup doesn't "successfully" resolve to it (no driver has
+    # card access to a placeholder terminal), letting the raw-ID / historical
+    # fallback tiers below actually run instead.
     term_rows = client.table("terminal_locations").select("terminal_id, terminal_name").execute().data
     terminal_name_map: dict[str, str] = {
         r["terminal_name"].lower().strip(): str(r["terminal_id"]).strip()
-        for r in term_rows if r.get("terminal_name") and r.get("terminal_id")
+        for r in term_rows
+        if r.get("terminal_name") and r.get("terminal_id")
+        and r["terminal_name"].lower().strip() != "not determined"
+    }
+    # Real, resolvable terminal IDs — used to validate the raw stored terminal_id
+    # fallback below. CE Connect's raw terminal_id can be a bare numeric string
+    # (e.g. "1.0") that doesn't match our ODBC-format IDs (e.g. "T-75-TX-2665"),
+    # in which case it should NOT block the historical-inference tier that follows.
+    valid_terminal_ids = {
+        str(r["terminal_id"]).strip() for r in term_rows
+        if r.get("terminal_id") and (r.get("terminal_name") or "").lower().strip() != "not determined"
     }
 
     # Group by ce_id
@@ -374,10 +420,14 @@ def load_loads_for_date(
         # Resolve terminal_id by name first (name-based lookup is authoritative).
         terminal_name = r.get("terminal_name") or ""
         terminal_id = terminal_name_map.get(terminal_name.lower().strip(), "")
-        # Fall back to the raw stored terminal_id (already an ODBC string)
+        # Fall back to the raw stored terminal_id (already an ODBC string) — but
+        # only if it's actually a real, resolvable terminal. CE Connect sometimes
+        # stores a bare numeric placeholder (e.g. "1.0") here that isn't a real
+        # ODBC ID; accepting it as-is would block the historical-inference tier
+        # below and later fail to resolve to any Terminal object anyway.
         if not terminal_id:
             raw_tid = str(r.get("terminal_id") or "").strip()
-            terminal_id = raw_tid if raw_tid and raw_tid.lower() != "none" else ""
+            terminal_id = raw_tid if raw_tid and raw_tid.lower() != "none" and raw_tid in valid_terminal_ids else ""
         # Last resort: infer terminal from historical deliveries to this site
         if not terminal_id:
             site_id = int(r.get("site_id") or 0)
@@ -406,6 +456,8 @@ def load_loads_for_date(
             assigned_driver_id=None,  # resolved from first_name/last_name if needed
             assigned_driver_first=r.get("first_name"),
             assigned_driver_last=r.get("last_name"),
+            split=int(r.get("split") or 0),
+            split_with_ce_id=int(r["split_with_ce_id"]) if r.get("split_with_ce_id") else None,
         )
         loads.append(load)
 

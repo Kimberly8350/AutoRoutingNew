@@ -103,6 +103,10 @@ class Load:
     assigned_driver_id: Optional[int] = None
     assigned_driver_first: Optional[str] = None
     assigned_driver_last: Optional[str] = None
+    # Split loads: loaded together with another ce_id in one terminal visit,
+    # then delivered to two different sites with no return-to-terminal between them.
+    split: int = 0
+    split_with_ce_id: Optional[int] = None
     # resolved
     site: Optional[Site] = None
     terminal: Optional[Terminal] = None
@@ -152,6 +156,11 @@ class RouteStop:
     loaded_miles: float = 0.0
     empty_miles: float = 0.0
     wait_mins: float = 0.0  # waiting for delivery window
+    # Split loads: this stop reuses the previous stop's terminal visit — no
+    # separate terminal drive/loading time, drives directly from the previous
+    # stop's site to this stop's site as a loaded leg.
+    is_split_continuation: bool = False
+    paired_ce_id: Optional[int] = None
 
 
 @dataclass
