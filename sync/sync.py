@@ -140,6 +140,10 @@ def transform_terminal_locations(df: pd.DataFrame) -> list[dict]:
     df = df[df["terminal_id"].str.len() > 0]
     if "is_diesel_wet" not in df.columns:
         df["is_diesel_wet"] = 0
+    # Deduplicate within the batch to prevent ON CONFLICT errors — terminal_id
+    # is the upsert key, and Postgres can't apply ON CONFLICT twice for the
+    # same key within one statement.
+    df = df.drop_duplicates(subset=["terminal_id"], keep="last")
     return df.where(pd.notnull(df), None).to_dict("records")
 
 
@@ -559,7 +563,13 @@ def sync_driver_clock_events_from_mysql(client: Client) -> dict:
     if not rows:
         return {"table": "driver_clock_events", "status": "ok", "rows_upserted": 0}
 
-    records = []
+    # A driver can have more than one dlb_routes record on the same shift_date
+    # (multiple trips/segments in one day). The upsert conflict target is
+    # (driver_id, shift_date), and Postgres can't apply ON CONFLICT DO UPDATE
+    # twice for the same key within one statement — so duplicates must be
+    # collapsed here first. Clock-in = earliest start, clock-out = latest
+    # finish across all of that driver's segments that day.
+    merged: dict[tuple, dict] = {}
     for r in rows:
         driver_id = r.get("driver_id")
         shift_date = r.get("shift_date")
@@ -567,8 +577,19 @@ def sync_driver_clock_events_from_mysql(client: Client) -> dict:
             continue
         route_start = r.get("route_start_time")
         route_finish = r.get("route_finish_time")
+        key = (int(driver_id), shift_date)
+        entry = merged.setdefault(key, {"start": route_start, "finish": route_finish})
+        if route_start and (entry["start"] is None or route_start < entry["start"]):
+            entry["start"] = route_start
+        if route_finish and (entry["finish"] is None or route_finish > entry["finish"]):
+            entry["finish"] = route_finish
+
+    records = []
+    for (driver_id, shift_date), entry in merged.items():
+        route_start = entry["start"]
+        route_finish = entry["finish"]
         records.append({
-            "driver_id": int(driver_id),
+            "driver_id": driver_id,
             "shift_date": shift_date.isoformat() if hasattr(shift_date, "isoformat") else str(shift_date),
             "route_start_time": route_start.isoformat() if hasattr(route_start, "isoformat") else (str(route_start) if route_start else None),
             "route_finish_time": route_finish.isoformat() if hasattr(route_finish, "isoformat") else (str(route_finish) if route_finish else None),
